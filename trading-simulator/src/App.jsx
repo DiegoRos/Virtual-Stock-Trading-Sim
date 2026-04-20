@@ -1,6 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
+import { useAuth } from 'react-oidc-context';
 
 // Import Components
 import NavigationSidebar from './components/NavigationSidebar';
@@ -37,9 +38,15 @@ const MOCK_MARKET_WATCH = [
 
 export default function App() {
   const navigate = useNavigate();
+  const auth = useAuth();
+
+  useEffect(() => {
+    if (auth.error) {
+      console.error("Authentication Error Details:", auth.error);
+    }
+  }, [auth.error]);
 
   // --- APPLICATION STATE ---
-  const [user, setUser] = useState(null); // Null means not logged in (Simulates Cognito)
   const [marketData, setMarketData] = useState(MOCK_MARKET_DATA);
   
   // Simulating DynamoDB UserDB & Portfolio Holdings
@@ -50,6 +57,12 @@ export default function App() {
     total_invested: 0,
     watchlist: ["AAPL", "NVDA"]
   });
+
+  useEffect(() => {
+    if (auth.isAuthenticated && auth.user?.profile?.email) {
+      setUserDB(prev => ({ ...prev, email: auth.user.profile.email }));
+    }
+  }, [auth.isAuthenticated, auth.user]);
 
   const [portfolio, setPortfolio] = useState([
     { ticker: "AAPL", quantity: 50, average_buy_price: 150.00 },
@@ -185,18 +198,14 @@ export default function App() {
 
   const totalAUM = userDB.current_cash + calculatePortfolioValue();
 
-  // --- AUTHENTICATION (Simulating Cognito) ---
-  const handleLogin = (e) => {
-    e.preventDefault();
-    const email = e.target.email.value;
-    setUser({ email, token: "mock_jwt_token_header.payload.signature" });
-    setUserDB(prev => ({ ...prev, email }));
-    navigate('/');
-  };
-
+  // --- AUTHENTICATION ---
   const handleLogout = () => {
-    setUser(null);
-    navigate('/');
+    const clientId = import.meta.env.VITE_COGNITO_CLIENT_ID;
+    const logoutUri = import.meta.env.VITE_COGNITO_LOGOUT_URI;
+    const cognitoDomain = import.meta.env.VITE_COGNITO_DOMAIN;
+    
+    auth.removeUser();
+    window.location.href = `${cognitoDomain}/logout?client_id=${clientId}&logout_uri=${encodeURIComponent(logoutUri)}`;
   };
 
   // --- TRADING LOGIC ---
@@ -319,8 +328,16 @@ export default function App() {
     document.body.removeChild(link);
   };
 
-  if (!user) {
-    return <Login onLogin={handleLogin} />;
+  if (auth.isLoading) {
+    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Loading...</div>;
+  }
+
+  if (auth.error) {
+    return <div className="min-h-screen bg-slate-900 flex items-center justify-center text-white">Authentication Error: {auth.error.message}</div>;
+  }
+
+  if (!auth.isAuthenticated) {
+    return <Login onLogin={() => auth.signinRedirect()} />;
   }
 
   return (
@@ -329,6 +346,7 @@ export default function App() {
         totalAUM={totalAUM} 
         currentCash={userDB.current_cash} 
         onLogout={handleLogout} 
+        userEmail={auth.user?.profile?.email}
       />
 
       <main className="flex-1 p-4 md:p-8 overflow-y-auto">

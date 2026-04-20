@@ -2,7 +2,7 @@ import React from 'react';
 import { NavLink } from 'react-router-dom';
 import { LineChart, DollarSign, Briefcase, History, LogOut } from 'lucide-react';
 
-const NavigationSidebar = ({ totalAUM, currentCash, onLogout }) => {
+const NavigationSidebar = ({ totalAUM, currentCash, onLogout, userEmail }) => {
   const navItems = [
     { to: "/", icon: <LineChart size={20} />, label: "Dashboard" },
     { to: "/trade", icon: <DollarSign size={20} />, label: "Trading Desk" },
@@ -35,6 +35,12 @@ const NavigationSidebar = ({ totalAUM, currentCash, onLogout }) => {
 
       <div className="p-4 border-t border-slate-700">
         <div className="mb-4">
+          {userEmail && (
+            <div className="mb-4 pb-4 border-b border-slate-700">
+              <p className="text-xs text-slate-500 uppercase font-semibold">User</p>
+              <p className="text-sm text-slate-300 truncate" title={userEmail}>{userEmail}</p>
+            </div>
+          )}
           <p className="text-xs text-slate-500 uppercase font-semibold">Account Value</p>
           <p className="text-xl font-bold text-white">${totalAUM.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
           <p className="text-sm text-slate-400">Cash: ${currentCash.toLocaleString(undefined, {minimumFractionDigits: 2})}</p>
