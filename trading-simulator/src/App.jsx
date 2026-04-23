@@ -48,6 +48,9 @@ export default function App() {
 
   // --- APPLICATION STATE ---
   const [marketData, setMarketData] = useState(MOCK_MARKET_DATA);
+  const [news, setNews] = useState([]);
+  const [newsLoading, setNewsLoading] = useState(false);
+  const [newsError, setNewsError] = useState('');
   
   // Simulating DynamoDB UserDB & Portfolio Holdings
   const [userDB, setUserDB] = useState({
@@ -141,6 +144,30 @@ export default function App() {
     }
     return data.reverse();
   }, [tradeTicker, timeframe, marketData]);
+
+  const fetchNews = async (symbol) => {
+    setNewsLoading(true);
+    setNewsError('');
+    try {
+      const response = await fetch(
+        `https://9k0gvdwbp6.execute-api.us-east-1.amazonaws.com/dev/news?symbol=${symbol}&limit=5`
+      );
+      if (!response.ok) throw new Error('Failed to fetch news');
+      const data = await response.json();
+      setNews(data);
+    } catch (err) {
+      setNewsError('Could not load news. Please try again later.');
+      console.error(err);
+    } finally {
+      setNewsLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    if (auth.isAuthenticated) {
+      fetchNews(tradeTicker);
+    }
+  }, [auth.isAuthenticated, tradeTicker]);
 
   // --- GLOBAL SEARCH ---
   const handleSearchSubmit = (e) => {
@@ -369,8 +396,14 @@ export default function App() {
           <Route path="/" element={
             <Dashboard 
               marketWatch={MOCK_MARKET_WATCH}
-              news={MOCK_NEWS}
               userWatchlist={userWatchlist}
+              news={news}
+              newsLoading={newsLoading}
+              newsError={newsError}
+              tradeTicker={tradeTicker}
+              setTradeTicker={setTradeTicker}
+              onFetchNews={fetchNews}
+              marketData={marketData}
               newWatchlistSymbol={newWatchlistSymbol}
               setNewWatchlistSymbol={setNewWatchlistSymbol}
               handleAddWatchlist={handleAddWatchlist}

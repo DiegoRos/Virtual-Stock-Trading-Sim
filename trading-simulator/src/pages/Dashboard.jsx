@@ -4,7 +4,13 @@ import WatchlistTable from '../components/WatchlistTable';
 
 const Dashboard = ({ 
   marketWatch, 
-  news, 
+  news,
+  newsLoading,
+  newsError,
+  tradeTicker,
+  setTradeTicker,
+  onFetchNews,
+  marketData,
   userWatchlist, 
   newWatchlistSymbol, 
   setNewWatchlistSymbol, 
@@ -13,6 +19,7 @@ const Dashboard = ({
 }) => {
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
+
       {/* Market Data Grid */}
       <div>
         <h2 className="text-2xl font-bold text-white mb-4">Market Overview</h2>
@@ -43,25 +50,100 @@ const Dashboard = ({
         onTrade={onTrade}
       />
 
-      {/* AWS Comprehend Mock News */}
+      {/* Live News from API Gateway */}
       <div className="mt-8">
-        <h3 className="text-xl font-bold text-white mb-4 flex items-center gap-2">
-          <AlertCircle size={20} className="text-blue-400"/> AI Market Insights (Comprehend)
-        </h3>
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-xl font-bold text-white flex items-center gap-2">
+            <AlertCircle size={20} className="text-blue-400"/> AI Market Insights
+          </h3>
+          <div className="flex items-center gap-3">
+            <select
+              value={tradeTicker}
+              onChange={(e) => { setTradeTicker(e.target.value); onFetchNews(e.target.value); }}
+              className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+            >
+              {Object.keys(marketData).map(sym => (
+                <option key={sym} value={sym}>{sym}</option>
+              ))}
+            </select>
+            <button
+              onClick={() => onFetchNews(tradeTicker)}
+              className="bg-slate-700 hover:bg-slate-600 text-white text-sm px-3 py-1.5 rounded-md transition-colors"
+            >
+              Refresh
+            </button>
+          </div>
+        </div>
+
         <div className="bg-slate-800 rounded-xl border border-slate-700 overflow-hidden">
-          {news.map((n) => (
-            <div key={n.id} className="p-4 border-b border-slate-700 last:border-0 flex items-start gap-4">
-              <span className={`px-2 py-1 text-xs font-bold rounded mt-1 ${
-                n.sentiment === 'POSITIVE' ? 'bg-green-900/50 text-green-400' : 
-                n.sentiment === 'NEGATIVE' ? 'bg-red-900/50 text-red-400' : 'bg-slate-700 text-slate-300'
+          {newsLoading && (
+            <div className="p-8 text-center text-slate-400 text-sm animate-pulse">
+              Fetching latest news...
+            </div>
+          )}
+
+          {newsError && !newsLoading && (
+            <div className="p-4 flex items-center gap-3 text-red-400 text-sm">
+              <AlertCircle size={16}/> {newsError}
+            </div>
+          )}
+
+          {!newsLoading && !newsError && news.length === 0 && (
+            <div className="p-8 text-center text-slate-500 text-sm">
+              No news found for {tradeTicker}.
+            </div>
+          )}
+
+          {!newsLoading && news.map((item, index) => (
+            <div key={index} className="p-4 border-b border-slate-700 last:border-0 flex items-start gap-4">
+              <span className={`px-2 py-1 text-xs font-bold rounded mt-1 shrink-0 ${
+                item.sentiment === 'POSITIVE' ? 'bg-green-900/50 text-green-400' :
+                item.sentiment === 'NEGATIVE' ? 'bg-red-900/50 text-red-400' :
+                'bg-slate-700 text-slate-300'
               }`}>
-                {n.ticker}
+                {item.impact || item.sentiment}
               </span>
-              <p className="text-slate-300 text-sm leading-relaxed">{n.headline}</p>
+
+              <div className="flex flex-col gap-1 min-w-0">
+                <p className="text-slate-200 text-sm font-medium leading-snug">{item.title}</p>
+
+                {item.summary && (
+                  <p className="text-slate-400 text-xs leading-relaxed mt-1">{item.summary}</p>
+                )}
+
+                {item.impact_str && (
+                  <p className="text-slate-400 text-xs leading-relaxed mt-1">
+                    <span className="text-white font-bold">Impact: </span>
+                    {item.impact_str}
+                  </p>
+                )}
+
+                <div className="flex items-center gap-3 mt-2">
+                  {item.source && (
+                    <span className="text-slate-500 text-xs">{item.source}</span>
+                  )}
+                  {item.url && (
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
+                    >
+                      Read more →
+                    </a>
+                  )}
+                  {item.timestamp && (
+                    <span className="text-slate-600 text-xs ml-auto">
+                      {new Date(item.timestamp).toLocaleDateString()}
+                    </span>
+                  )}
+                </div>
+              </div>
             </div>
           ))}
         </div>
       </div>
+
     </div>
   );
 };
