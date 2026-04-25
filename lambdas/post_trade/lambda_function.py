@@ -23,39 +23,40 @@ def lambda_handler(event, context):
         body = json.loads(event.get('body', '{}'), parse_float=Decimal)
         
         ticker = body.get('ticker')
-        quantity = Decimal(str(body.get('quantity')))
-        side = body.get('side', '').upper() # BUY or SELL
-        price = Decimal(str(body.get('price')))
+        # Support both 'side' (API standard) and 'action' (from some tests)
+        side = (body.get('side') or body.get('action') or "").upper()
         order_type = body.get('type', 'MARKET').upper()
         
-        if not ticker or not quantity or not side or not price:
+        # Get raw values for validation before Decimal conversion
+        raw_qty = body.get('quantity')
+        raw_price = body.get('price')
+        
+        if not ticker or not side or raw_qty is None or raw_price is None:
             return {
                 'statusCode': 400,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Missing required fields'})
+                'body': json.dumps({'error': 'Missing required fields (ticker, side/action, quantity, price)'})
             }
 
+        quantity = Decimal(str(raw_qty))
+        price = Decimal(str(raw_price))
         total_cost = quantity * price
         order_id = str(uuid.uuid4())
         timestamp = datetime.datetime.utcnow().isoformat()
         
-        # Determine initial status
-        # In this Phase 4, we mark MARKET orders as FILLED.
-        # LIMIT and STOP_LOSS orders are marked as OPEN to be handled by the trigger lambda in Phase 6.
         initial_status = 'FILLED' if order_type == 'MARKET' else 'OPEN'
 
         if side == 'BUY':
             # Check if user has enough cash
             user_response = dynamodb.Table(USER_TABLE).get_item(Key={'user_id': user_id})
-            if 'Item' not in user_response or user_response['Item'].get('current_cash', 0) < total_cost:
+            current_cash = user_response.get('Item', {}).get('current_cash', 0)
+            if current_cash < total_cost:
                 return {
                     'statusCode': 400,
                     'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
                     'body': json.dumps({'error': 'Insufficient funds'})
                 }
 
-            # Atomic transaction: Deduct cash (for both Market and Limit to "lock" funds), update portfolio (only for filled), record transaction
-            
             transact_items = [
                 {
                     'Update': {
@@ -69,15 +70,25 @@ def lambda_handler(event, context):
             ]
 
             if initial_status == 'FILLED':
+                # Since DynamoDB doesn't support complex math in UpdateExpressions, 
+                # we fetch current holdings to calculate new average price.
+                # In a high-concurrency app, we'd use optimistic locking here.
+                portfolio_res = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
+                item = portfolio_res.get('Item', {})
+                old_qty = item.get('quantity', Decimal('0'))
+                old_avg = item.get('average_buy_price', Decimal('0'))
+                
+                new_qty = old_qty + quantity
+                new_avg = ((old_avg * old_qty) + total_cost) / new_qty
+
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-                        'UpdateExpression': 'ADD quantity :qty SET average_buy_price = (if_not_exists(average_buy_price, :zero) * if_not_exists(quantity, :zero) + :cost) / (if_not_exists(quantity, :zero) + :qty)',
+                        'UpdateExpression': 'SET quantity = :nq, average_buy_price = :navg',
                         'ExpressionAttributeValues': {
-                            ':qty': {'N': str(quantity)},
-                            ':cost': {'N': str(total_cost)},
-                            ':zero': {'N': '0'}
+                            ':nq': {'N': str(new_qty)},
+                            ':navg': {'N': str(new_avg)}
                         }
                     }
                 })

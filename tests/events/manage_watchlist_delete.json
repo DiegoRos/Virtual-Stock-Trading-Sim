@@ -2,7 +2,7 @@
   "requestContext": {
     "authorizer": {
       "claims": {
-        "sub": "test-user-123"
+        "sub": "84d8e4f8-60d1-70c0-06ce-19aa8b7227c0"
       }
     }
   },

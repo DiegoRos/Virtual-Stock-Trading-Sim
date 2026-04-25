@@ -7,5 +7,5 @@
     }
   },
   "httpMethod": "POST",
-  "body": "{\"ticker\": \"AAPL\", \"action\": \"BUY\", \"type\": \"MARKET\", \"quantity\": 10}"
+  "body": "{\"ticker\": \"AAPL\", \"side\": \"BUY\", \"type\": \"MARKET\", \"quantity\": 10, \"price\": 175.00}"
 }
