@@ -1,0 +1,13 @@
+{
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "sub": "test-user-123"
+      }
+    }
+  },
+  "httpMethod": "DELETE",
+  "queryStringParameters": {
+    "ticker": "AAPL"
+  }
+}

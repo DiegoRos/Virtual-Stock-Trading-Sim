@@ -15,6 +15,7 @@ const Dashboard = ({
   newWatchlistSymbol, 
   setNewWatchlistSymbol, 
   handleAddWatchlist, 
+  onRemove,
   onTrade 
 }) => {
   return (
@@ -47,6 +48,7 @@ const Dashboard = ({
         newWatchlistSymbol={newWatchlistSymbol}
         setNewWatchlistSymbol={setNewWatchlistSymbol}
         handleAddWatchlist={handleAddWatchlist}
+        onRemove={onRemove}
         onTrade={onTrade}
       />
 

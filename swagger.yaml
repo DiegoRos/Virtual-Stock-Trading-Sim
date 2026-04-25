@@ -1,0 +1,275 @@
+openapi: 3.0.1
+info:
+  title: Trading Simulator API
+  version: "1.0"
+servers:
+  - url: "https://api.trading-simulator.com" # Placeholder
+
+paths:
+  /profile:
+    get:
+      summary: Get user profile details (cash, watchlist)
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-get-profile/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  /portfolio:
+    get:
+      summary: Get user portfolio holdings
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-get-portfolio/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  /trade:
+    post:
+      summary: Execute or place a trade order
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-post-trade/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'POST,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  /watchlist:
+    get:
+      summary: Get user watchlist
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    post:
+      summary: Add ticker to watchlist
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    delete:
+      summary: Remove ticker from watchlist
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,POST,DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  /orders:
+    get:
+      summary: Get order history
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-orders/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'GET,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+  /orders/{orderId}:
+    delete:
+      summary: Cancel an open order
+      parameters:
+        - name: orderId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OK
+      security:
+        - CognitoAuth: []
+      x-amazon-apigateway-integration:
+        uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-orders/invocations"
+        httpMethod: POST
+        type: aws_proxy
+    options:
+      responses:
+        "200":
+          description: OK
+          headers:
+            Access-Control-Allow-Origin:
+              schema:
+                type: string
+            Access-Control-Allow-Methods:
+              schema:
+                type: string
+            Access-Control-Allow-Headers:
+              schema:
+                type: string
+      x-amazon-apigateway-integration:
+        type: mock
+        requestTemplates:
+          application/json: '{"statusCode": 200}'
+        responses:
+          default:
+            statusCode: "200"
+            responseParameters:
+              method.response.header.Access-Control-Allow-Headers: "'Content-Type,X-Amz-Date,Authorization,X-Api-Key,X-Amz-Security-Token'"
+              method.response.header.Access-Control-Allow-Methods: "'DELETE,OPTIONS'"
+              method.response.header.Access-Control-Allow-Origin: "'*'"
+
+components:
+  securitySchemes:
+    CognitoAuth:
+      type: apiKey
+      name: Authorization
+      in: header
+      x-amazon-apigateway-authtype: cognito_user_pools
+      x-amazon-apigateway-authorizer:
+        type: cognito_user_pools
+        providerARNs:
+          - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}" # Placeholder

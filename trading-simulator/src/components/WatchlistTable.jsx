@@ -6,6 +6,7 @@ const WatchlistTable = ({
   newWatchlistSymbol, 
   setNewWatchlistSymbol, 
   handleAddWatchlist, 
+  onRemove,
   onTrade 
 }) => {
   return (
@@ -60,12 +61,20 @@ const WatchlistTable = ({
                       </div>
                     </td>
                     <td className="p-4 text-center">
-                      <button 
-                        onClick={() => onTrade(stock)} 
-                        className="text-[#3b82f6] hover:text-blue-300 transition-colors font-bold text-xs tracking-wide"
-                      >
-                        TRADE
-                      </button>
+                      <div className="flex items-center justify-center gap-4">
+                        <button 
+                          onClick={() => onTrade(stock)} 
+                          className="text-[#3b82f6] hover:text-blue-300 transition-colors font-bold text-xs tracking-wide"
+                        >
+                          TRADE
+                        </button>
+                        <button 
+                          onClick={() => onRemove(stock.symbol)} 
+                          className="text-red-500 hover:text-red-400 transition-colors font-bold text-xs tracking-wide"
+                        >
+                          REMOVE
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 ))}

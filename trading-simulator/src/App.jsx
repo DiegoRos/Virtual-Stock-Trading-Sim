@@ -5,6 +5,7 @@ import { useAuth } from 'react-oidc-context';
 
 // Import Components
 import NavigationSidebar from './components/NavigationSidebar';
+import { api } from './services/api';
 
 // Import Pages
 import Dashboard from './pages/Dashboard';
@@ -21,12 +22,6 @@ const MOCK_MARKET_DATA = {
   AMZN: { price: 178.15, change: 0.8, name: "Amazon.com Inc." },
   NVDA: { price: 880.00, change: 3.5, name: "NVIDIA Corp." },
 };
-
-const MOCK_NEWS = [
-  { id: 1, ticker: "NVDA", headline: "NVIDIA announces new AI chips, exceeding analyst expectations.", sentiment: "POSITIVE" },
-  { id: 2, ticker: "TSLA", headline: "Tesla faces production delays in Berlin gigafactory.", sentiment: "NEGATIVE" },
-  { id: 3, ticker: "AAPL", headline: "Apple vision pro sales stabilize in Q2.", sentiment: "NEUTRAL" },
-];
 
 const MOCK_MARKET_WATCH = [
   { symbol: 'S&P 500', price: 4520.25, change: 12.50, percent: 0.28 },
@@ -52,28 +47,51 @@ export default function App() {
   const [newsLoading, setNewsLoading] = useState(false);
   const [newsError, setNewsError] = useState('');
   
-  // Simulating DynamoDB UserDB & Portfolio Holdings
+  // Real Backend State
   const [userDB, setUserDB] = useState({
-    user_id: "user_123",
+    user_id: "",
     email: "",
-    current_cash: 100000.00,
+    current_cash: 0,
     total_invested: 0,
-    watchlist: ["AAPL", "NVDA"]
+    watchlist: []
   });
 
-  useEffect(() => {
-    if (auth.isAuthenticated && auth.user?.profile?.email) {
-      setUserDB(prev => ({ ...prev, email: auth.user.profile.email }));
-    }
-  }, [auth.isAuthenticated, auth.user]);
-
-  const [portfolio, setPortfolio] = useState([
-    { ticker: "AAPL", quantity: 50, average_buy_price: 150.00 },
-    { ticker: "MSFT", quantity: 10, average_buy_price: 400.00 }
-  ]);
-
-  // Simulating DynamoDB TransactionsDB
+  const [portfolio, setPortfolio] = useState([]);
   const [transactions, setTransactions] = useState([]);
+  const [userWatchlist, setUserWatchlist] = useState([]);
+
+  const loadUserData = async () => {
+    if (auth.isAuthenticated && auth.user?.access_token) {
+      try {
+        const token = auth.user.access_token;
+        const profile = await api.getProfile(token);
+        setUserDB({ ...profile, email: auth.user.profile.email });
+        
+        const userPortfolio = await api.getPortfolio(token);
+        setPortfolio(userPortfolio);
+
+        const userTransactions = await api.getOrders(token);
+        setTransactions(userTransactions);
+
+        // Fetch detailed watchlist data (simulated for now)
+        if (profile.watchlist) {
+          const detailedWatchlist = profile.watchlist.map(sym => ({
+            symbol: sym,
+            price: marketData[sym]?.price || 100,
+            change: marketData[sym]?.change || 0,
+            percent: marketData[sym]?.change || 0
+          }));
+          setUserWatchlist(detailedWatchlist);
+        }
+      } catch (err) {
+        console.error("Error loading user data:", err);
+      }
+    }
+  };
+
+  useEffect(() => {
+    loadUserData();
+  }, [auth.isAuthenticated, auth.user]);
 
   // --- UI STATE ---
   const [tradeTicker, setTradeTicker] = useState('AAPL');
@@ -84,12 +102,6 @@ export default function App() {
   const [tradeError, setTradeError] = useState('');
   const [tradeSuccess, setTradeSuccess] = useState('');
 
-  // Watchlist State
-  const [userWatchlist, setUserWatchlist] = useState([
-    { symbol: 'NVDA', price: 450.20, change: 15.30, percent: 3.50 },
-    { symbol: 'MSFT', price: 330.10, change: 2.10, percent: 0.64 },
-    { symbol: 'META', price: 298.50, change: -1.20, percent: -0.40 },
-  ]);
   const [newWatchlistSymbol, setNewWatchlistSymbol] = useState('');
 
   // --- CHART DATA GENERATION ---
@@ -149,6 +161,7 @@ export default function App() {
     setNewsLoading(true);
     setNewsError('');
     try {
+      // In Phase 5 we will have a real news API. For now, keep the existing call or mock it.
       const response = await fetch(
         `https://9k0gvdwbp6.execute-api.us-east-1.amazonaws.com/dev/news?symbol=${symbol}&limit=5`
       );
@@ -192,27 +205,28 @@ export default function App() {
   };
 
   // --- WATCHLIST HANDLER ---
-  const handleAddWatchlist = (e) => {
+  const handleAddWatchlist = async (e) => {
     e.preventDefault();
-    if (!newWatchlistSymbol.trim()) return;
+    if (!newWatchlistSymbol.trim() || !auth.user?.access_token) return;
     const sym = newWatchlistSymbol.toUpperCase().trim();
     
-    if (userWatchlist.find(item => item.symbol === sym)) {
+    try {
+      await api.addToWatchlist(sym, auth.user.access_token);
+      await loadUserData();
       setNewWatchlistSymbol('');
-      return;
+    } catch (err) {
+      console.error("Failed to add to watchlist:", err);
     }
+  };
 
-    const price = 50 + Math.random() * 300;
-    const change = (Math.random() * 10) - 5;
-    const percent = (change / price) * 100;
-
-    setUserWatchlist([...userWatchlist, { 
-      symbol: sym, 
-      price, 
-      change, 
-      percent 
-    }]);
-    setNewWatchlistSymbol('');
+  const handleRemoveWatchlist = async (ticker) => {
+    if (!auth.user?.access_token) return;
+    try {
+      await api.removeFromWatchlist(ticker, auth.user.access_token);
+      await loadUserData();
+    } catch (err) {
+      console.error("Failed to remove from watchlist:", err);
+    }
   };
 
   // --- DERIVED METRICS ---
@@ -236,7 +250,7 @@ export default function App() {
   };
 
   // --- TRADING LOGIC ---
-  const handleTrade = (action) => {
+  const handleTrade = async (action) => {
     setTradeError('');
     setTradeSuccess('');
     
@@ -252,63 +266,30 @@ export default function App() {
       return;
     }
 
-    const totalCost = stock.price * qty;
+    try {
+      const tradeData = {
+        ticker: tradeTicker,
+        quantity: qty,
+        side: action,
+        price: stock.price,
+        type: orderType,
+        target_price: orderType !== 'MARKET' ? parseFloat(targetPrice) : null
+      };
 
-    if (action === 'BUY') {
-      if (orderType === 'MARKET') {
-        if (userDB.current_cash < totalCost) {
-          setTradeError(`Insufficient funds. You need $${totalCost.toFixed(2)} but have $${userDB.current_cash.toFixed(2)}.`);
-          return;
-        }
+      await api.executeTrade(tradeData, auth.user.access_token);
+      setTradeSuccess(`Successfully executed ${action} for ${qty} shares of ${tradeTicker}`);
+      await loadUserData();
+    } catch (err) {
+      setTradeError(err.message);
+    }
+  };
 
-        setUserDB(prev => ({
-          ...prev,
-          current_cash: prev.current_cash - totalCost,
-          total_invested: prev.total_invested + totalCost
-        }));
-
-        setPortfolio(prev => {
-          const existing = prev.find(p => p.ticker === tradeTicker);
-          if (existing) {
-            const newTotalQty = existing.quantity + qty;
-            const newAvgPrice = ((existing.quantity * existing.average_buy_price) + totalCost) / newTotalQty;
-            return prev.map(p => p.ticker === tradeTicker ? { ...p, quantity: newTotalQty, average_buy_price: newAvgPrice } : p);
-          } else {
-            return [...prev, { ticker: tradeTicker, quantity: qty, average_buy_price: stock.price }];
-          }
-        });
-
-        recordTransaction('BUY', 'MARKET', 'FILLED', stock.price, qty);
-        setTradeSuccess(`Successfully bought ${qty} shares of ${tradeTicker} at $${stock.price.toFixed(2)}`);
-      } else {
-        recordTransaction('BUY', orderType, 'OPEN', parseFloat(targetPrice) || null, qty);
-        setTradeSuccess(`Placed ${orderType} BUY order for ${qty} shares of ${tradeTicker}. Awaiting trigger.`);
-      }
-    } else if (action === 'SELL') {
-      const holding = portfolio.find(p => p.ticker === tradeTicker);
-      if (!holding || holding.quantity < qty) {
-        setTradeError(`Insufficient shares. You only own ${holding?.quantity || 0} shares of ${tradeTicker}.`);
-        return;
-      }
-
-      if (orderType === 'MARKET') {
-        setUserDB(prev => ({
-          ...prev,
-          current_cash: prev.current_cash + totalCost,
-          total_invested: prev.total_invested - (holding.average_buy_price * qty)
-        }));
-
-        setPortfolio(prev => {
-          const updated = prev.map(p => p.ticker === tradeTicker ? { ...p, quantity: p.quantity - qty } : p);
-          return updated.filter(p => p.quantity > 0);
-        });
-
-        recordTransaction('SELL', 'MARKET', 'FILLED', stock.price, qty);
-        setTradeSuccess(`Successfully sold ${qty} shares of ${tradeTicker} at $${stock.price.toFixed(2)}`);
-      } else {
-        recordTransaction('SELL', orderType, 'OPEN', parseFloat(targetPrice) || null, qty);
-        setTradeSuccess(`Placed ${orderType} SELL order for ${qty} shares of ${tradeTicker}. Awaiting trigger.`);
-      }
+  const handleCancelOrder = async (orderId) => {
+    try {
+      await api.cancelOrder(orderId, auth.user.access_token);
+      await loadUserData();
+    } catch (err) {
+      alert(err.message);
     }
   };
 
@@ -407,6 +388,7 @@ export default function App() {
               newWatchlistSymbol={newWatchlistSymbol}
               setNewWatchlistSymbol={setNewWatchlistSymbol}
               handleAddWatchlist={handleAddWatchlist}
+              onRemove={handleRemoveWatchlist}
               onTrade={(stock) => {
                 if (!marketData[stock.symbol]) {
                   setMarketData(prev => ({
@@ -451,7 +433,7 @@ export default function App() {
             />
           } />
           <Route path="/history" element={
-            <History transactions={transactions} />
+            <History transactions={transactions} onCancel={handleCancelOrder} />
           } />
         </Routes>
       </main>

@@ -1,0 +1,11 @@
+{
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "sub": "84d8e4f8-60d1-70c0-06ce-19aa8b7227c0"
+      }
+    }
+  },
+  "httpMethod": "POST",
+  "body": "{\"ticker\": \"TSLA\", \"action\": \"BUY\", \"type\": \"LIMIT\", \"quantity\": 5, \"price\": 150.00}"
+}
