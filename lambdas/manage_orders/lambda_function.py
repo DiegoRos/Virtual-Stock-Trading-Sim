@@ -16,9 +16,24 @@ class DecimalEncoder(json.JSONEncoder):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
+def get_user_id(event):
+    """Helper to extract user_id from Cognito Authorizer or fallback for testing."""
+    # 1. Standard Cognito Authorizer (Production)
+    authorizer = event.get('requestContext', {}).get('authorizer')
+    if authorizer and 'claims' in authorizer:
+        return authorizer['claims'].get('sub')
+    
+    # 2. API Gateway Console Test (Falls back to IAM User ARN)
+    identity = event.get('requestContext', {}).get('identity', {})
+    if identity.get('userArn'):
+        return identity['userArn'].split('/')[-1]
+    
+    # 3. Local/Manual Testing fallback
+    return 'test-user'
+
 def lambda_handler(event, context):
     try:
-        user_id = event['requestContext']['authorizer']['claims']['sub']
+        user_id = get_user_id(event)
         method = event['httpMethod']
         
         if method == 'GET':

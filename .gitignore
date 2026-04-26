@@ -218,5 +218,8 @@ yarn-error.log*
 .DS_Store
 Thumbs.db
 
+# API Documentation
+swagger.local.yaml
+
 GEMINI.md
 *.pdf

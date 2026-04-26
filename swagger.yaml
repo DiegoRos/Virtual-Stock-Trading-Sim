@@ -15,6 +15,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-get-profile/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -53,6 +54,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-get-portfolio/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -91,6 +93,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-post-trade/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -129,6 +132,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -140,6 +144,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -151,6 +156,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-watchlist/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -189,6 +195,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-orders/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -233,6 +240,7 @@ paths:
       security:
         - CognitoAuth: []
       x-amazon-apigateway-integration:
+        # NOTE: Generic placeholders below. Replace with real values in swagger.local.yaml
         uri: "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:ts-manage-orders/invocations"
         httpMethod: POST
         type: aws_proxy
@@ -272,4 +280,5 @@ components:
       x-amazon-apigateway-authorizer:
         type: cognito_user_pools
         providerARNs:
-          - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}" # Placeholder
+          # NOTE: Generic placeholder below. Replace with real values in swagger.local.yaml
+          - "arn:aws:cognito-idp:${AWS::Region}:${AWS::AccountId}:userpool/${UserPoolId}"

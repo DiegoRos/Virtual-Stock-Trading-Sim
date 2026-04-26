@@ -11,9 +11,19 @@ class DecimalEncoder(json.JSONEncoder):
             return float(obj)
         return super(DecimalEncoder, self).default(obj)
 
+def get_user_id(event):
+    """Helper to extract user_id from Cognito Authorizer or fallback for testing."""
+    authorizer = event.get('requestContext', {}).get('authorizer')
+    if authorizer and 'claims' in authorizer:
+        return authorizer['claims'].get('sub')
+    identity = event.get('requestContext', {}).get('identity', {})
+    if identity.get('userArn'):
+        return identity['userArn'].split('/')[-1]
+    return 'test-user'
+
 def lambda_handler(event, context):
     try:
-        user_id = event['requestContext']['authorizer']['claims']['sub']
+        user_id = get_user_id(event)
         
         response = table.query(
             KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id)
