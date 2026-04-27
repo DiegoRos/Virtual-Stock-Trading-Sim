@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useAuth } from 'react-oidc-context';
 
@@ -8,6 +8,7 @@ import NavigationSidebar from './components/NavigationSidebar';
 import { api } from './services/api';
 
 // Import Pages
+import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import Trade from './pages/Trade';
 import Portfolio from './pages/Portfolio';
@@ -375,6 +376,10 @@ export default function App() {
 
         <Routes>
           <Route path="/" element={
+            <Home userEmail={auth.user?.profile?.email} />
+          } />
+          <Route path="/index.html" element={<Navigate to="/" replace />} />
+          <Route path="/dashboard" element={
             <Dashboard 
               marketWatch={MOCK_MARKET_WATCH}
               userWatchlist={userWatchlist}
