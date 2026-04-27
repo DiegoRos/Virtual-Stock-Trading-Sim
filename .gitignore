@@ -195,6 +195,8 @@ __marimo__/
 # Environment Variables (IMPORTANT: keep secrets out of Git)
 .env
 .env.local
+.env.development
+.env.production
 .env.development.local
 .env.test.local
 .env.production.local
