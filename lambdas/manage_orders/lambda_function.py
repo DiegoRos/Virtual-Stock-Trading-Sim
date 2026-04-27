@@ -104,12 +104,19 @@ def lambda_handler(event, context):
                 })
             else:
                 # Refund shares
+                avg_buy_price = order.get('average_buy_price', Decimal('0'))
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-                        'UpdateExpression': 'SET quantity = quantity + :qty',
-                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}}
+                        # if_not_exists(quantity, :zero) ensures it works if item was deleted
+                        # We restore average_buy_price if it was deleted; if it exists, we keep current avg
+                        'UpdateExpression': 'SET quantity = if_not_exists(quantity, :zero) + :qty, average_buy_price = if_not_exists(average_buy_price, :avg)',
+                        'ExpressionAttributeValues': {
+                            ':qty': {'N': str(quantity)},
+                            ':zero': {'N': '0'},
+                            ':avg': {'N': str(avg_buy_price)}
+                        }
                     }
                 })
 

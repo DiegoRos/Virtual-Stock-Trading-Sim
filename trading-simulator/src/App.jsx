@@ -62,9 +62,9 @@ export default function App() {
   const [userWatchlist, setUserWatchlist] = useState([]);
 
   const loadUserData = async () => {
-    if (auth.isAuthenticated && auth.user?.access_token) {
+    if (auth.isAuthenticated && auth.user?.id_token) {
       try {
-        const token = auth.user.access_token;
+        const token = auth.user.id_token;
         const profile = await api.getProfile(token);
         setUserDB({ ...profile, email: auth.user.profile.email });
         
@@ -208,11 +208,11 @@ export default function App() {
   // --- WATCHLIST HANDLER ---
   const handleAddWatchlist = async (e) => {
     e.preventDefault();
-    if (!newWatchlistSymbol.trim() || !auth.user?.access_token) return;
+    if (!newWatchlistSymbol.trim() || !auth.user?.id_token) return;
     const sym = newWatchlistSymbol.toUpperCase().trim();
     
     try {
-      await api.addToWatchlist(sym, auth.user.access_token);
+      await api.addToWatchlist(sym, auth.user.id_token);
       await loadUserData();
       setNewWatchlistSymbol('');
     } catch (err) {
@@ -221,9 +221,9 @@ export default function App() {
   };
 
   const handleRemoveWatchlist = async (ticker) => {
-    if (!auth.user?.access_token) return;
+    if (!auth.user?.id_token) return;
     try {
-      await api.removeFromWatchlist(ticker, auth.user.access_token);
+      await api.removeFromWatchlist(ticker, auth.user.id_token);
       await loadUserData();
     } catch (err) {
       console.error("Failed to remove from watchlist:", err);
@@ -277,7 +277,7 @@ export default function App() {
         target_price: orderType !== 'MARKET' ? parseFloat(targetPrice) : null
       };
 
-      await api.executeTrade(tradeData, auth.user.access_token);
+      await api.executeTrade(tradeData, auth.user.id_token);
       setTradeSuccess(`Successfully executed ${action} for ${qty} shares of ${tradeTicker}`);
       await loadUserData();
     } catch (err) {
@@ -287,7 +287,7 @@ export default function App() {
 
   const handleCancelOrder = async (orderId) => {
     try {
-      await api.cancelOrder(orderId, auth.user.access_token);
+      await api.cancelOrder(orderId, auth.user.id_token);
       await loadUserData();
     } catch (err) {
       alert(err.message);

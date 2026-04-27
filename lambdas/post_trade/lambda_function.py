@@ -123,7 +123,11 @@ def lambda_handler(event, context):
         elif side == 'SELL':
             # Check if user has enough shares
             portfolio_response = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
-            if 'Item' not in portfolio_response or portfolio_response['Item'].get('quantity', 0) < quantity:
+            item = portfolio_response.get('Item', {})
+            current_qty = item.get('quantity', Decimal('0'))
+            avg_buy_price = item.get('average_buy_price', Decimal('0'))
+
+            if 'Item' not in portfolio_response or current_qty < quantity:
                 return {
                     'statusCode': 400,
                     'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
@@ -141,17 +145,18 @@ def lambda_handler(event, context):
                         'ExpressionAttributeValues': {':gain': {'N': str(total_cost)}}
                     }
                 })
+            
+            # If we are selling all shares (or locking all shares for a limit order), delete the entry
+            if current_qty == quantity:
                 transact_items.append({
-                    'Update': {
+                    'Delete': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-                        'UpdateExpression': 'SET quantity = quantity - :qty',
-                        'ConditionExpression': 'quantity >= :qty',
+                        'ConditionExpression': 'quantity = :qty',
                         'ExpressionAttributeValues': {':qty': {'N': str(quantity)}}
                     }
                 })
             else:
-                # For Limit Sell, we "lock" the shares so they can't be sold twice
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
@@ -171,6 +176,7 @@ def lambda_handler(event, context):
                         'ticker': {'S': ticker},
                         'quantity': {'N': str(quantity)},
                         'price': {'N': str(price)},
+                        'average_buy_price': {'N': str(avg_buy_price)},
                         'side': {'S': side},
                         'status': {'S': initial_status},
                         'timestamp': {'S': timestamp},

@@ -1,38 +1,58 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || '';
+/**
+ * API Service using the AWS API Gateway SDK
+ * The SDK is loaded globally via index.html as `apigClientFactory`
+ */
 
-const apiRequest = async (path, method = 'GET', body = null, token = null) => {
-  const options = {
-    method,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  };
+const getClient = (token) => {
+  if (typeof window.apigClientFactory === 'undefined') {
+    console.error('apigClientFactory is not defined. Ensure index.html includes the SDK scripts.');
+    return null;
+  }
+
+  // If using Cognito Authorizer, we pass the token in additionalParams
+  return window.apigClientFactory.newClient({
+    // apiKey: '...', // If needed
+  });
+};
+
+const apiRequest = async (methodName, params = {}, body = {}, additionalParams = {}, token = null) => {
+  const client = getClient();
+  if (!client) throw new Error('API Client not initialized');
 
   if (token) {
-    options.headers['Authorization'] = `Bearer ${token}`;
+    if (!additionalParams.headers) additionalParams.headers = {};
+    // Many Cognito Authorizers expect the token with "Bearer " prefix, 
+    // although some are configured for just the raw token.
+    additionalParams.headers['Authorization'] = token.startsWith('Bearer ') ? token : `Bearer ${token}`;
   }
 
-  if (body) {
-    options.body = JSON.stringify(body);
+  try {
+    const response = await client[methodName](params, body, additionalParams);
+    return response.data;
+  } catch (error) {
+    // If it's a CORS error, error.response might be undefined
+    console.error(`API Error in ${methodName}:`, error);
+    
+    if (error.response) {
+      const errorMessage = error.response.data?.error || error.response.data?.message || `API Error: ${error.response.status}`;
+      throw new Error(errorMessage);
+    } else if (error.data) {
+      // The SDK sometimes puts data directly on the error object
+      const errorMessage = error.data.error || error.data.message || `API Error: ${error.status}`;
+      throw new Error(errorMessage);
+    }
+    
+    throw new Error('Network Error or CORS failure. Check API Gateway CORS and Authorizer configuration.');
   }
-
-  const response = await fetch(`${API_BASE_URL}${path}`, options);
-  
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.error || `API Error: ${response.status}`);
-  }
-
-  return response.json();
 };
 
 export const api = {
-  getProfile: (token) => apiRequest('/profile', 'GET', null, token),
-  getPortfolio: (token) => apiRequest('/portfolio', 'GET', null, token),
-  executeTrade: (tradeData, token) => apiRequest('/trade', 'POST', tradeData, token),
-  getWatchlist: (token) => apiRequest('/watchlist', 'GET', null, token),
-  addToWatchlist: (ticker, token) => apiRequest('/watchlist', 'POST', { ticker }, token),
-  removeFromWatchlist: (ticker, token) => apiRequest(`/watchlist?ticker=${ticker}`, 'DELETE', null, token),
-  getOrders: (token) => apiRequest('/orders', 'GET', null, token),
-  cancelOrder: (orderId, token) => apiRequest(`/orders/${orderId}`, 'DELETE', null, token),
+  getProfile: (token) => apiRequest('profileGet', {}, {}, {}, token),
+  getPortfolio: (token) => apiRequest('portfolioGet', {}, {}, {}, token),
+  executeTrade: (tradeData, token) => apiRequest('tradePost', {}, tradeData, {}, token),
+  getWatchlist: (token) => apiRequest('watchlistGet', {}, {}, {}, token),
+  addToWatchlist: (ticker, token) => apiRequest('watchlistPost', {}, { ticker }, {}, token),
+  removeFromWatchlist: (ticker, token) => apiRequest('watchlistDelete', { ticker }, {}, {}, token),
+  getOrders: (token) => apiRequest('ordersGet', {}, {}, {}, token),
+  cancelOrder: (orderId, token) => apiRequest('ordersOrderIdDelete', { orderId }, {}, {}, token),
 };
