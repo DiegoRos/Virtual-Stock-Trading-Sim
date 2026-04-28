@@ -3,7 +3,7 @@
  * The SDK is loaded globally via index.html as `apigClientFactory`
  */
 
-const getClient = (token) => {
+const getClient = () => {
   if (typeof window.apigClientFactory === 'undefined') {
     console.error('apigClientFactory is not defined. Ensure index.html includes the SDK scripts.');
     return null;
