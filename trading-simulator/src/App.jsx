@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useAuth } from 'react-oidc-context';
@@ -62,7 +62,7 @@ export default function App() {
   const [userWatchlist, setUserWatchlist] = useState([]);
 
   const loadUserData = useCallback(async () => {
-  if (auth.isAuthenticated && auth.user?.id_token) {
+    if (auth.isAuthenticated && auth.user?.id_token) {
       try {
         const token = auth.user.id_token;
         const profile = await api.getProfile(token);
@@ -88,7 +88,7 @@ export default function App() {
         console.error("Error loading user data:", err);
       }
     }
-  }, [auth.isAuthenticated, auth.user?.access_token, auth.user?.profile?.email, marketData]);
+  }, [auth.isAuthenticated, auth.user?.id_token, auth.user?.profile?.email, marketData]);
 
   useEffect(() => {
     loadUserData();
@@ -286,7 +286,7 @@ export default function App() {
         target_price: parsedTargetPrice
       };
 
-      const result = await api.executeTrade(tradeData, auth.user.access_token);
+      const result = await api.executeTrade(tradeData, auth.user.id_token);
       const status = result.status || (isQueuedOrder ? 'OPEN' : 'FILLED');
       const localOrder = {
         order_id: result.order_id,
@@ -325,7 +325,7 @@ export default function App() {
   const handleCancelOrder = async (orderId) => {
     try {
       const cancelledOrder = transactions.find(tx => tx.order_id === orderId);
-      await api.cancelOrder(orderId, auth.user.access_token);
+      await api.cancelOrder(orderId, auth.user.id_token);
       setTransactions(prev => prev.map(tx => (
         tx.order_id === orderId ? { ...tx, status: 'CANCELLED' } : tx
       )));
