@@ -95,6 +95,20 @@ for entry in "${LAMBDAS[@]}"; do
     
     # Cleanup zip
     rm -f "$ZIP_FILE"
+
+    # Grant API Gateway Permission
+    API_ID="wn8yk62l0h" # From your execution logs
+    REGION="us-east-1"
+    ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
+    
+    echo "Ensuring API Gateway permission for $FUNC_NAME..."
+    aws lambda add-permission \
+        --function-name "$FUNC_NAME" \
+        --statement-id "AllowExecutionFromAPIGateway" \
+        --action "lambda:InvokeFunction" \
+        --principal "apigateway.amazonaws.com" \
+        --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/*/*" \
+        2>/dev/null || echo "Permission already exists for $FUNC_NAME."
 done
 
 echo "------------------------------------"

@@ -1,5 +1,5 @@
-import React, { useState, useMemo, useEffect, useCallback } from 'react';
-import { Routes, Route, useNavigate } from 'react-router-dom';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Routes, Route, useNavigate, Navigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useAuth } from 'react-oidc-context';
 
@@ -8,6 +8,7 @@ import NavigationSidebar from './components/NavigationSidebar';
 import { api } from './services/api';
 
 // Import Pages
+import Home from './pages/Home';
 import Dashboard from './pages/Dashboard';
 import Trade from './pages/Trade';
 import Portfolio from './pages/Portfolio';
@@ -61,9 +62,9 @@ export default function App() {
   const [userWatchlist, setUserWatchlist] = useState([]);
 
   const loadUserData = useCallback(async () => {
-    if (auth.isAuthenticated && auth.user?.access_token) {
+  if (auth.isAuthenticated && auth.user?.id_token) {
       try {
-        const token = auth.user.access_token;
+        const token = auth.user.id_token;
         const profile = await api.getProfile(token);
         setUserDB({ ...profile, email: auth.user.profile.email });
         
@@ -207,11 +208,11 @@ export default function App() {
   // --- WATCHLIST HANDLER ---
   const handleAddWatchlist = async (e) => {
     e.preventDefault();
-    if (!newWatchlistSymbol.trim() || !auth.user?.access_token) return;
+    if (!newWatchlistSymbol.trim() || !auth.user?.id_token) return;
     const sym = newWatchlistSymbol.toUpperCase().trim();
     
     try {
-      await api.addToWatchlist(sym, auth.user.access_token);
+      await api.addToWatchlist(sym, auth.user.id_token);
       await loadUserData();
       setNewWatchlistSymbol('');
     } catch (err) {
@@ -220,9 +221,9 @@ export default function App() {
   };
 
   const handleRemoveWatchlist = async (ticker) => {
-    if (!auth.user?.access_token) return;
+    if (!auth.user?.id_token) return;
     try {
-      await api.removeFromWatchlist(ticker, auth.user.access_token);
+      await api.removeFromWatchlist(ticker, auth.user.id_token);
       await loadUserData();
     } catch (err) {
       console.error("Failed to remove from watchlist:", err);
@@ -411,6 +412,10 @@ export default function App() {
 
         <Routes>
           <Route path="/" element={
+            <Home userEmail={auth.user?.profile?.email} />
+          } />
+          <Route path="/index.html" element={<Navigate to="/" replace />} />
+          <Route path="/dashboard" element={
             <Dashboard 
               marketWatch={MOCK_MARKET_WATCH}
               userWatchlist={userWatchlist}

@@ -1,10 +1,11 @@
 import React from 'react';
 import { NavLink } from 'react-router-dom';
-import { LineChart, DollarSign, Briefcase, History, LogOut } from 'lucide-react';
+import { Home, LineChart, DollarSign, Briefcase, History, LogOut } from 'lucide-react';
 
 const NavigationSidebar = ({ totalAUM, currentCash, onLogout, userEmail }) => {
   const navItems = [
-    { to: "/", icon: <LineChart size={20} />, label: "Dashboard" },
+    { to: "/", icon: <Home size={20} />, label: "Home" },
+    { to: "/dashboard", icon: <LineChart size={20} />, label: "Dashboard" },
     { to: "/trade", icon: <DollarSign size={20} />, label: "Trading Desk" },
     { to: "/portfolio", icon: <Briefcase size={20} />, label: "Portfolio" },
     { to: "/history", icon: <History size={20} />, label: "Orders & History" },
