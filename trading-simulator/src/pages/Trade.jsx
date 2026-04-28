@@ -1,29 +1,37 @@
 import React from 'react';
-import { Search, TrendingUp, TrendingDown, AlertCircle, CheckCircle2 } from 'lucide-react';
+import { Search, TrendingUp, TrendingDown, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
 import StockChart from '../components/StockChart';
 
-const Trade = ({ 
-  tradeTicker, 
-  setTradeTicker, 
-  marketData, 
-  chartData, 
-  timeframe, 
-  setTimeframe, 
-  tradeError, 
-  tradeSuccess, 
-  orderType, 
-  setOrderType, 
-  targetPrice, 
-  setTargetPrice, 
-  tradeQuantity, 
-  setTradeQuantity, 
-  handleTrade, 
-  currentCash 
+const Trade = ({
+  tradeTicker,
+  setTradeTicker,
+  marketData,
+  chartData,
+  timeframe,
+  setTimeframe,
+  tradeError,
+  tradeSuccess,
+  orderType,
+  setOrderType,
+  targetPrice,
+  setTargetPrice,
+  tradeQuantity,
+  setTradeQuantity,
+  handleTrade,
+  currentCash,
+  openOrders = []
 }) => {
+  const selectedStock = marketData[tradeTicker];
+  const queuedPrice = orderType !== 'MARKET' ? parseFloat(targetPrice) : null;
+  const estimatedPrice = orderType === 'MARKET' ? selectedStock?.price : queuedPrice;
+  const estimatedCost = Number.isFinite(estimatedPrice)
+    ? (estimatedPrice * (parseInt(tradeQuantity) || 0)).toFixed(2)
+    : '--';
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
       <h2 className="text-2xl font-bold text-white mb-6">Trading Desk</h2>
-      
+
       {/* STOCK CHART & HEADER */}
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
@@ -62,7 +70,7 @@ const Trade = ({
       </div>
 
       <div className="bg-slate-800 rounded-xl border border-slate-700 p-6">
-        
+
         {/* Status Messages */}
         {tradeError && (
           <div className="mb-6 p-4 bg-red-900/30 border border-red-500/50 rounded-lg flex items-center gap-3 text-red-400">
@@ -82,8 +90,8 @@ const Trade = ({
               <label className="block text-sm text-slate-400 mb-2">Symbol</label>
               <div className="relative">
                 <Search className="absolute left-3 top-3 text-slate-500" size={18} />
-                <input 
-                  type="text" 
+                <input
+                  type="text"
                   value={tradeTicker}
                   onChange={(e) => setTradeTicker(e.target.value.toUpperCase())}
                   className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-10 pr-4 py-2.5 text-white font-mono uppercase focus:outline-none focus:border-blue-500"
@@ -93,8 +101,8 @@ const Trade = ({
 
             <div>
               <label className="block text-sm text-slate-400 mb-2">Order Type</label>
-              <select 
-                value={orderType} 
+              <select
+                value={orderType}
                 onChange={(e) => setOrderType(e.target.value)}
                 className="w-full bg-slate-900 border border-slate-600 rounded-lg px-4 py-2.5 text-white focus:outline-none focus:border-blue-500"
               >
@@ -107,8 +115,8 @@ const Trade = ({
             {orderType !== 'MARKET' && (
               <div>
                 <label className="block text-sm text-slate-400 mb-2">Target Price ($)</label>
-                <input 
-                  type="number" 
+                <input
+                  type="number"
                   value={targetPrice}
                   onChange={(e) => setTargetPrice(e.target.value)}
                   placeholder="0.00"
@@ -119,8 +127,8 @@ const Trade = ({
 
             <div>
               <label className="block text-sm text-slate-400 mb-2">Quantity (Shares)</label>
-              <input 
-                type="number" 
+              <input
+                type="number"
                 min="1"
                 value={tradeQuantity}
                 onChange={(e) => setTradeQuantity(e.target.value)}
@@ -152,14 +160,34 @@ const Trade = ({
                   </div>
                   <div className="pt-4 border-t border-slate-700">
                     <div className="flex justify-between text-sm mb-2">
-                      <span className="text-slate-400">Estimated Cost:</span>
-                      <span className="text-white">${orderType === 'MARKET' ? (marketData[tradeTicker].price * (tradeQuantity || 0)).toFixed(2) : '--'}</span>
+                      <span className="text-slate-400">{orderType === 'MARKET' ? 'Estimated Cost:' : 'Reserved Cash:'}</span>
+                      <span className="text-white">{estimatedCost === '--' ? '--' : `$${estimatedCost}`}</span>
                     </div>
                     <div className="flex justify-between text-sm">
                       <span className="text-slate-400">Buying Power:</span>
                       <span className="text-white">${currentCash.toLocaleString()}</span>
                     </div>
                   </div>
+                  {openOrders.length > 0 && (
+                    <div className="pt-4 border-t border-slate-700">
+                      <div className="flex items-center gap-2 text-sm font-semibold text-yellow-400 mb-3">
+                        <Clock size={14} />
+                        <span>Open Queue</span>
+                      </div>
+                      <div className="space-y-2">
+                        {openOrders.map(order => (
+                          <div key={order.order_id} className="flex items-center justify-between gap-4 text-xs">
+                            <span className="text-slate-300">
+                              {(order.type || order.order_type || '').replace('_', ' ')} {order.side || order.trade_action}
+                            </span>
+                            <span className="text-slate-400">
+                              {order.quantity} @ ${Number(order.target_price || order.price || 0).toFixed(2)}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
               ) : (
                 <p className="text-sm text-slate-500 italic">Enter a valid ticker to view quote (e.g., AAPL, MSFT, TSLA, NVDA)</p>

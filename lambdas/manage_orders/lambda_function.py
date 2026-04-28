@@ -74,8 +74,8 @@ def lambda_handler(event, context):
             # Atomic transaction to cancel order and refund assets
             ticker = order.get('ticker')
             quantity = order.get('quantity')
-            price = order.get('price')
-            side = order.get('side')
+            price = order.get('target_price') or order.get('price')
+            side = (order.get('side') or '').upper()
             total_amount = quantity * price
 
             transact_items = [
@@ -85,7 +85,6 @@ def lambda_handler(event, context):
                         'Key': {'user_id': {'S': user_id}, 'order_id': {'S': order_id}},
                         'UpdateExpression': 'SET #s = :c',
                         'ExpressionAttributeNames': {'#s': 'status'},
-                        'ExpressionAttributeValues': {':c': {'S': 'CANCELLED'}},
                         'ConditionExpression': '#s = :o',
                         'ExpressionAttributeValues': {':c': {'S': 'CANCELLED'}, ':o': {'S': 'OPEN'}}
                     }
