@@ -7,5 +7,5 @@
     }
   },
   "httpMethod": "POST",
-  "body": "{\"ticker\": \"TSLA\", \"side\": \"BUY\", \"type\": \"LIMIT\", \"quantity\": 5, \"price\": 150.00}"
+  "body": "{\"ticker\": \"TSLA\", \"side\": \"BUY\", \"type\": \"LIMIT\", \"quantity\": 5, \"price\": 150.00, \"quote_price\": 175.22, \"target_price\": 150.00}"
 }

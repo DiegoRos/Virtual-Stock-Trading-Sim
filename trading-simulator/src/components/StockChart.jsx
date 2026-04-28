@@ -1,16 +1,22 @@
 import React, { useMemo } from 'react';
 
-const StockChart = ({ data, timeframe }) => {
-  if (!data || data.length === 0) return null;
+const EMPTY_CHART_DATA = [
+  { price: 0, timestamp: 0 },
+  { price: 0, timestamp: 1 }
+];
 
+const StockChart = ({ data, timeframe }) => {
   const chartWidth = 900;
   const chartHeight = 250;
   const paddingLeft = 70;
   const paddingRight = 20;
   const paddingBottom = 40;
   const paddingTop = 20;
+  const hasData = Array.isArray(data) && data.length > 0;
+  const chartData = hasData ? data : EMPTY_CHART_DATA;
+  const pointDivisor = Math.max(chartData.length - 1, 1);
 
-  const prices = data.map(d => d.price);
+  const prices = chartData.map(d => d.price);
   const minPrice = Math.min(...prices);
   const maxPrice = Math.max(...prices);
   const range = maxPrice - minPrice || 1;
@@ -19,13 +25,13 @@ const StockChart = ({ data, timeframe }) => {
   const trueMax = maxPrice + padding;
   const trueRange = trueMax - trueMin;
 
-  const points = data.map((d, i) => {
-    const x = paddingLeft + (i / (data.length - 1)) * chartWidth;
+  const points = chartData.map((d, i) => {
+    const x = paddingLeft + (i / pointDivisor) * chartWidth;
     const y = chartHeight - ((d.price - trueMin) / trueRange) * chartHeight + paddingTop;
     return `${x},${y}`;
   }).join(' ');
 
-  const isPositive = data[data.length - 1].price >= data[0].price;
+  const isPositive = chartData[chartData.length - 1].price >= chartData[0].price;
   const color = isPositive ? '#22c55e' : '#ef4444';
 
   // Generate Y-axis labels (Prices)
@@ -38,22 +44,22 @@ const StockChart = ({ data, timeframe }) => {
       labels.push({ price, y });
     }
     return labels;
-  }, [trueMin, trueMax, trueRange]);
+  }, [trueMin, trueRange]);
 
   // Generate X-axis labels (Dates)
   const xLabels = useMemo(() => {
     const labels = [];
     const count = 5;
-    const step = Math.floor((data.length - 1) / (count - 1));
-    
+    const step = Math.max(Math.floor((chartData.length - 1) / (count - 1)), 1);
+
     for (let i = 0; i < count; i++) {
-      const index = Math.min(i * step, data.length - 1);
-      const d = data[index];
-      const x = paddingLeft + (index / (data.length - 1)) * chartWidth;
-      
+      const index = Math.min(i * step, chartData.length - 1);
+      const d = chartData[index];
+      const x = paddingLeft + (index / pointDivisor) * chartWidth;
+
       const date = new Date(d.timestamp);
       let label = '';
-      
+
       if (timeframe === '1D') {
         label = date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       } else if (timeframe === '5D' || timeframe === '1W' || timeframe === '1M') {
@@ -63,17 +69,19 @@ const StockChart = ({ data, timeframe }) => {
       } else {
         label = date.toLocaleDateString([], { year: 'numeric' });
       }
-      
+
       labels.push({ label, x });
     }
     return labels;
-  }, [data, timeframe]);
+  }, [chartData, pointDivisor, timeframe]);
+
+  if (!hasData) return null;
 
   return (
     <div className="w-full h-full relative">
-      <svg 
-        viewBox={`0 0 ${chartWidth + paddingLeft + paddingRight} ${chartHeight + paddingTop + paddingBottom}`} 
-        className="w-full h-full overflow-visible" 
+      <svg
+        viewBox={`0 0 ${chartWidth + paddingLeft + paddingRight} ${chartHeight + paddingTop + paddingBottom}`}
+        className="w-full h-full overflow-visible"
         preserveAspectRatio="none"
       >
         <defs>
@@ -86,12 +94,12 @@ const StockChart = ({ data, timeframe }) => {
         {/* Y-Axis Grid Lines and Labels */}
         {yLabels.map((l, i) => (
           <React.Fragment key={i}>
-            <line 
-              x1={paddingLeft} y1={l.y} x2={chartWidth + paddingLeft} y2={l.y} 
-              stroke="#334155" strokeWidth="1" strokeDasharray="4 4" 
+            <line
+              x1={paddingLeft} y1={l.y} x2={chartWidth + paddingLeft} y2={l.y}
+              stroke="#334155" strokeWidth="1" strokeDasharray="4 4"
             />
-            <text 
-              x={paddingLeft - 8} y={l.y + 4} 
+            <text
+              x={paddingLeft - 8} y={l.y + 4}
               textAnchor="end"
               className="fill-slate-500 text-[12px] font-medium"
             >
@@ -102,9 +110,9 @@ const StockChart = ({ data, timeframe }) => {
 
         {/* X-Axis Labels */}
         {xLabels.map((l, i) => (
-          <text 
+          <text
             key={i}
-            x={l.x} y={chartHeight + paddingTop + 25} 
+            x={l.x} y={chartHeight + paddingTop + 25}
             textAnchor={i === 0 ? 'start' : i === xLabels.length - 1 ? 'end' : 'middle'}
             className="fill-slate-500 text-[12px] font-medium uppercase tracking-wider"
           >
@@ -113,24 +121,24 @@ const StockChart = ({ data, timeframe }) => {
         ))}
 
         {/* Chart Lines */}
-        <polyline 
-          fill="none" 
-          stroke={color} 
-          strokeWidth="2.5" 
-          points={points} 
-          vectorEffect="non-scaling-stroke" 
+        <polyline
+          fill="none"
+          stroke={color}
+          strokeWidth="2.5"
+          points={points}
+          vectorEffect="non-scaling-stroke"
           strokeLinejoin="round"
           strokeLinecap="round"
         />
-        <polygon 
-          fill="url(#chartGradient)" 
-          points={`${paddingLeft},${chartHeight + paddingTop} ${points} ${chartWidth + paddingLeft},${chartHeight + paddingTop}`} 
+        <polygon
+          fill="url(#chartGradient)"
+          points={`${paddingLeft},${chartHeight + paddingTop} ${points} ${chartWidth + paddingLeft},${chartHeight + paddingTop}`}
         />
 
         {/* Current Price Line */}
-        <line 
-          x1={paddingLeft} y1={chartHeight - ((data[data.length-1].price - trueMin) / trueRange) * chartHeight + paddingTop} 
-          x2={chartWidth + paddingLeft} y2={chartHeight - ((data[data.length-1].price - trueMin) / trueRange) * chartHeight + paddingTop} 
+        <line
+          x1={paddingLeft} y1={chartHeight - ((chartData[chartData.length-1].price - trueMin) / trueRange) * chartHeight + paddingTop}
+          x2={chartWidth + paddingLeft} y2={chartHeight - ((chartData[chartData.length-1].price - trueMin) / trueRange) * chartHeight + paddingTop}
           stroke={color} strokeWidth="1" strokeDasharray="2 2" opacity="0.5"
         />
       </svg>

@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useState, useMemo, useEffect, useCallback } from 'react';
 import { Routes, Route, useNavigate } from 'react-router-dom';
 import { Search } from 'lucide-react';
 import { useAuth } from 'react-oidc-context';
@@ -60,7 +60,7 @@ export default function App() {
   const [transactions, setTransactions] = useState([]);
   const [userWatchlist, setUserWatchlist] = useState([]);
 
-  const loadUserData = async () => {
+  const loadUserData = useCallback(async () => {
     if (auth.isAuthenticated && auth.user?.access_token) {
       try {
         const token = auth.user.access_token;
@@ -87,11 +87,11 @@ export default function App() {
         console.error("Error loading user data:", err);
       }
     }
-  };
+  }, [auth.isAuthenticated, auth.user?.access_token, auth.user?.profile?.email, marketData]);
 
   useEffect(() => {
     loadUserData();
-  }, [auth.isAuthenticated, auth.user]);
+  }, [loadUserData]);
 
   // --- UI STATE ---
   const [tradeTicker, setTradeTicker] = useState('AAPL');
@@ -266,18 +266,55 @@ export default function App() {
       return;
     }
 
+    const isQueuedOrder = orderType !== 'MARKET';
+    const parsedTargetPrice = isQueuedOrder ? parseFloat(targetPrice) : null;
+    if (isQueuedOrder && (isNaN(parsedTargetPrice) || parsedTargetPrice <= 0)) {
+      setTradeError("Please enter a valid target price.");
+      return;
+    }
+
     try {
+      const orderPrice = isQueuedOrder ? parsedTargetPrice : stock.price;
       const tradeData = {
         ticker: tradeTicker,
         quantity: qty,
         side: action,
-        price: stock.price,
+        price: orderPrice,
+        quote_price: stock.price,
         type: orderType,
-        target_price: orderType !== 'MARKET' ? parseFloat(targetPrice) : null
+        target_price: parsedTargetPrice
       };
 
-      await api.executeTrade(tradeData, auth.user.access_token);
-      setTradeSuccess(`Successfully executed ${action} for ${qty} shares of ${tradeTicker}`);
+      const result = await api.executeTrade(tradeData, auth.user.access_token);
+      const status = result.status || (isQueuedOrder ? 'OPEN' : 'FILLED');
+      const localOrder = {
+        order_id: result.order_id,
+        ticker: tradeTicker,
+        quantity: qty,
+        side: action,
+        price: orderPrice,
+        quote_price: stock.price,
+        target_price: parsedTargetPrice,
+        execution_price: status === 'FILLED' ? orderPrice : null,
+        type: orderType,
+        status,
+        timestamp: new Date().toISOString()
+      };
+
+      setTransactions(prev => [
+        localOrder,
+        ...prev.filter(tx => tx.order_id !== localOrder.order_id)
+      ]);
+
+      if (action === 'BUY') {
+        const reservedCash = qty * orderPrice;
+        setUserDB(prev => ({
+          ...prev,
+          current_cash: Math.max(0, Number(prev.current_cash || 0) - reservedCash)
+        }));
+      }
+
+      setTradeSuccess(`${result.message}: ${action} ${qty} shares of ${tradeTicker}`);
       await loadUserData();
     } catch (err) {
       setTradeError(err.message);
@@ -286,26 +323,25 @@ export default function App() {
 
   const handleCancelOrder = async (orderId) => {
     try {
+      const cancelledOrder = transactions.find(tx => tx.order_id === orderId);
       await api.cancelOrder(orderId, auth.user.access_token);
+      setTransactions(prev => prev.map(tx => (
+        tx.order_id === orderId ? { ...tx, status: 'CANCELLED' } : tx
+      )));
+
+      if ((cancelledOrder?.trade_action || cancelledOrder?.side) === 'BUY') {
+        const refundPrice = Number(cancelledOrder.target_price || cancelledOrder.price || 0);
+        const refundQuantity = Number(cancelledOrder.quantity || 0);
+        setUserDB(prev => ({
+          ...prev,
+          current_cash: Number(prev.current_cash || 0) + (refundPrice * refundQuantity)
+        }));
+      }
+
       await loadUserData();
     } catch (err) {
       alert(err.message);
     }
-  };
-
-  const recordTransaction = (action, type, status, price, qty) => {
-    const newTx = {
-      order_id: `ord_${Math.random().toString(36).substr(2, 9)}`,
-      ticker: tradeTicker,
-      trade_action: action,
-      order_type: type,
-      quantity: qty,
-      target_price: type !== 'MARKET' ? price : null,
-      execution_price: status === 'FILLED' ? price : null,
-      status: status,
-      order_timestamp: Date.now()
-    };
-    setTransactions(prev => [newTx, ...prev]);
   };
 
   const handleDownloadCSV = () => {
@@ -419,6 +455,9 @@ export default function App() {
               setTradeQuantity={setTradeQuantity}
               handleTrade={handleTrade}
               currentCash={userDB.current_cash}
+              openOrders={transactions.filter(tx => (
+                tx.ticker === tradeTicker && (tx.status === 'OPEN' || tx.status === 'PENDING')
+              ))}
             />
           } />
           <Route path="/portfolio" element={

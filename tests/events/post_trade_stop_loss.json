@@ -1,0 +1,11 @@
+{
+  "requestContext": {
+    "authorizer": {
+      "claims": {
+        "sub": "84d8e4f8-60d1-70c0-06ce-19aa8b7227c0"
+      }
+    }
+  },
+  "httpMethod": "POST",
+  "body": "{\"ticker\": \"TSLA\", \"side\": \"BUY\", \"type\": \"STOP_LOSS\", \"quantity\": 5, \"price\": 190.00, \"quote_price\": 175.22, \"target_price\": 190.00}"
+}

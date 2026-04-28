@@ -10,6 +10,7 @@ client = boto3.client('dynamodb')
 USER_TABLE = 'UserDB'
 PORTFOLIO_TABLE = 'PortfolioHoldings'
 TRANSACTIONS_TABLE = 'TransactionsDB'
+SUPPORTED_ORDER_TYPES = {'MARKET', 'LIMIT', 'STOP_LOSS'}
 
 class DecimalEncoder(json.JSONEncoder):
     def default(self, obj):
@@ -30,6 +31,8 @@ def lambda_handler(event, context):
         # Get raw values for validation before Decimal conversion
         raw_qty = body.get('quantity')
         raw_price = body.get('price')
+        raw_target_price = body.get('target_price')
+        raw_quote_price = body.get('quote_price')
         
         if not ticker or not side or raw_qty is None or raw_price is None:
             return {
@@ -40,11 +43,66 @@ def lambda_handler(event, context):
 
         quantity = Decimal(str(raw_qty))
         price = Decimal(str(raw_price))
-        total_cost = quantity * price
+        target_price = Decimal(str(raw_target_price)) if raw_target_price is not None else None
+        quote_price = Decimal(str(raw_quote_price)) if raw_quote_price is not None else price
+
+        if side not in {'BUY', 'SELL'}:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Invalid side. Must be BUY or SELL'})
+            }
+
+        if order_type not in SUPPORTED_ORDER_TYPES:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Invalid order type. Must be MARKET, LIMIT, or STOP_LOSS'})
+            }
+
+        if quantity <= 0 or price <= 0:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Quantity and price must be greater than zero'})
+            }
+
+        if quote_price <= 0:
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Quote price must be greater than zero'})
+            }
+
+        if order_type != 'MARKET' and (target_price is None or target_price <= 0):
+            return {
+                'statusCode': 400,
+                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                'body': json.dumps({'error': 'Target price is required for LIMIT and STOP_LOSS orders'})
+            }
+
+        order_price = price if order_type == 'MARKET' else target_price
+        total_cost = quantity * order_price
         order_id = str(uuid.uuid4())
         timestamp = datetime.datetime.utcnow().isoformat()
         
         initial_status = 'FILLED' if order_type == 'MARKET' else 'OPEN'
+        transaction_item = {
+            'user_id': {'S': user_id},
+            'order_id': {'S': order_id},
+            'ticker': {'S': ticker},
+            'quantity': {'N': str(quantity)},
+            'price': {'N': str(order_price)},
+            'side': {'S': side},
+            'status': {'S': initial_status},
+            'timestamp': {'S': timestamp},
+            'type': {'S': order_type}
+        }
+        if initial_status == 'FILLED':
+            transaction_item['execution_price'] = {'N': str(price)}
+        else:
+            transaction_item['target_price'] = {'N': str(order_price)}
+            transaction_item['quote_price'] = {'N': str(quote_price)}
 
         if side == 'BUY':
             # Check if user has enough cash
@@ -96,17 +154,7 @@ def lambda_handler(event, context):
             transact_items.append({
                 'Put': {
                     'TableName': TRANSACTIONS_TABLE,
-                    'Item': {
-                        'user_id': {'S': user_id},
-                        'order_id': {'S': order_id},
-                        'ticker': {'S': ticker},
-                        'quantity': {'N': str(quantity)},
-                        'price': {'N': str(price)},
-                        'side': {'S': side},
-                        'status': {'S': initial_status},
-                        'timestamp': {'S': timestamp},
-                        'type': {'S': order_type}
-                    }
+                    'Item': transaction_item
                 }
             })
 
@@ -155,32 +203,17 @@ def lambda_handler(event, context):
             transact_items.append({
                 'Put': {
                     'TableName': TRANSACTIONS_TABLE,
-                    'Item': {
-                        'user_id': {'S': user_id},
-                        'order_id': {'S': order_id},
-                        'ticker': {'S': ticker},
-                        'quantity': {'N': str(quantity)},
-                        'price': {'N': str(price)},
-                        'side': {'S': side},
-                        'status': {'S': initial_status},
-                        'timestamp': {'S': timestamp},
-                        'type': {'S': order_type}
-                    }
+                    'Item': transaction_item
                 }
             })
-        else:
-            return {
-                'statusCode': 400,
-                'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps({'error': 'Invalid side. Must be BUY or SELL'})
-            }
 
         client.transact_write_items(TransactItems=transact_items)
 
+        message = 'Trade executed successfully' if initial_status == 'FILLED' else 'Order queued successfully'
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'message': 'Trade executed successfully', 'order_id': order_id})
+            'body': json.dumps({'message': message, 'order_id': order_id, 'status': initial_status})
         }
 
     except Exception as e:
