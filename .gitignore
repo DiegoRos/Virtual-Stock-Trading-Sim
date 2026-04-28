@@ -225,3 +225,5 @@ swagger.local.yaml
 
 GEMINI.md
 *.pdf
+scripts/*
+*.zip
