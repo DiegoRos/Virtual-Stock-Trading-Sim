@@ -41,10 +41,19 @@ def lambda_handler(event, context):
             response = table.query(
                 KeyConditionExpression=boto3.dynamodb.conditions.Key('user_id').eq(user_id)
             )
+            items = response.get('Items', [])
+            
+            # 1. Sort by timestamp DESC (most recent first)
+            items.sort(key=lambda x: x.get('timestamp') or x.get('order_timestamp') or '', reverse=True)
+            
+            # 2. Stable sort by priority (OPEN/PENDING at top)
+            # Python's sort is stable, so orders within same priority remain sorted by timestamp
+            items.sort(key=lambda x: 0 if (x.get('status') or '').upper().strip() in ['OPEN', 'PENDING'] else 1)
+            
             return {
                 'statusCode': 200,
                 'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                'body': json.dumps(response.get('Items', []), cls=DecimalEncoder)
+                'body': json.dumps(items, cls=DecimalEncoder)
             }
             
         elif method == 'DELETE':

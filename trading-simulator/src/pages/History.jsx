@@ -2,6 +2,28 @@ import React from 'react';
 import { Clock, CheckCircle2 } from 'lucide-react';
 
 const History = ({ transactions, onCancel }) => {
+  const sortedTransactions = React.useMemo(() => {
+    return [...transactions].sort((a, b) => {
+      const sA = String(a.status || '').toUpperCase().trim();
+      const sB = String(b.status || '').toUpperCase().trim();
+      
+      const isPending = (s) => s === 'OPEN' || s === 'PENDING';
+      const pA = isPending(sA) ? 0 : 1;
+      const pB = isPending(sB) ? 0 : 1;
+
+      if (pA !== pB) return pA - pB;
+
+      const tA = new Date(a.order_timestamp || a.timestamp || 0).getTime();
+      const tB = new Date(b.order_timestamp || b.timestamp || 0).getTime();
+      
+      if (isNaN(tA) && isNaN(tB)) return 0;
+      if (isNaN(tA)) return 1;
+      if (isNaN(tB)) return -1;
+      
+      return tB - tA;
+    });
+  }, [transactions]);
+
   return (
     <div className="space-y-6">
       <h2 className="text-2xl font-bold text-white">Order History & Pending Triggers</h2>
@@ -22,10 +44,10 @@ const History = ({ transactions, onCancel }) => {
               </tr>
             </thead>
             <tbody className="text-sm divide-y divide-slate-700">
-              {transactions.length === 0 ? (
+              {sortedTransactions.length === 0 ? (
                 <tr><td colSpan="8" className="p-8 text-center text-slate-500">No transaction history.</td></tr>
               ) : (
-                transactions.map((tx) => (
+                sortedTransactions.map((tx) => (
                   <tr key={tx.order_id} className="hover:bg-slate-700/50 transition-colors">
                     <td className="p-4 text-slate-400">{new Date(tx.order_timestamp || tx.timestamp).toLocaleString()}</td>
                     <td className="p-4 font-bold text-white">{tx.ticker}</td>
