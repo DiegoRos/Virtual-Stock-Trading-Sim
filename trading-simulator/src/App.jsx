@@ -94,16 +94,6 @@ export default function App() {
     loadUserData();
   }, [loadUserData]);
 
-  useEffect(() => {
-    if (!auth.isAuthenticated || !auth.user?.id_token) return;
-
-    const refreshInterval = window.setInterval(() => {
-      loadUserData();
-    }, 60 * 1000);
-
-    return () => window.clearInterval(refreshInterval);
-  }, [auth.isAuthenticated, auth.user?.id_token, loadUserData]);
-
   // --- UI STATE ---
   const [tradeTicker, setTradeTicker] = useState('AAPL');
   const [timeframe, setTimeframe] = useState('1D');

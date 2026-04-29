@@ -183,8 +183,6 @@ def lambda_handler(event, context):
                 }
 
             transact_items = []
-
-            transaction_item['average_buy_price'] = {'N': str(avg_buy_price)}
             
             if initial_status == 'FILLED':
                 transact_items.append({

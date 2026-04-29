@@ -14,7 +14,6 @@ LAMBDAS=(
     "ts-post-trade:post_trade"
     "ts-manage-watchlist:manage_watchlist"
     "ts-manage-orders:manage_orders"
-    "ts-process-open-orders:process_open_orders"
 )
 
 # Parse target function argument
@@ -110,43 +109,7 @@ for entry in "${LAMBDAS[@]}"; do
         --principal "apigateway.amazonaws.com" \
         --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/*/*" \
         2>/dev/null || echo "Permission already exists for $FUNC_NAME."
-
-    if [ "$FUNC_NAME" == "ts-process-open-orders" ] && [ -n "$FINNHUB_API_KEY" ]; then
-        echo "Updating FINNHUB_API_KEY environment variable for $FUNC_NAME..."
-        aws lambda update-function-configuration \
-            --function-name "$FUNC_NAME" \
-            --environment "Variables={FINNHUB_API_KEY=$FINNHUB_API_KEY}" >/dev/null
-    fi
 done
-
-if [ -z "$TARGET" ] || [ "$TARGET" == "process_open_orders" ]; then
-    REGION="${REGION:-us-east-1}"
-    SCHEDULE_NAME="${ORDER_PROCESSOR_SCHEDULE_NAME:-ts-process-open-orders-every-minute}"
-    SCHEDULE_EXPRESSION="${ORDER_PROCESSOR_SCHEDULE:-rate(1 minute)}"
-    PROCESSOR_FUNCTION="ts-process-open-orders"
-
-    echo "Configuring EventBridge schedule '$SCHEDULE_NAME' ($SCHEDULE_EXPRESSION)..."
-    aws events put-rule \
-        --name "$SCHEDULE_NAME" \
-        --schedule-expression "$SCHEDULE_EXPRESSION" \
-        --state ENABLED \
-        --tags "Key=Project,Value=$TAG" >/dev/null
-
-    RULE_ARN=$(aws events describe-rule --name "$SCHEDULE_NAME" --query 'Arn' --output text)
-    PROCESSOR_ARN=$(aws lambda get-function --function-name "$PROCESSOR_FUNCTION" --query 'Configuration.FunctionArn' --output text)
-
-    aws lambda add-permission \
-        --function-name "$PROCESSOR_FUNCTION" \
-        --statement-id "AllowExecutionFromEventBridge" \
-        --action "lambda:InvokeFunction" \
-        --principal "events.amazonaws.com" \
-        --source-arn "$RULE_ARN" \
-        2>/dev/null || echo "EventBridge permission already exists for $PROCESSOR_FUNCTION."
-
-    aws events put-targets \
-        --rule "$SCHEDULE_NAME" \
-        --targets "Id"="1","Arn"="$PROCESSOR_ARN" >/dev/null
-fi
 
 echo "------------------------------------"
 echo "Deployment Complete!"
