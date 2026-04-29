@@ -97,7 +97,7 @@ for entry in "${LAMBDAS[@]}"; do
     rm -f "$ZIP_FILE"
 
     # Grant API Gateway Permission
-    API_ID="wn8yk62l0h" # From your execution logs
+    API_ID="${API_ID:-dshwsohlu4}"
     REGION="us-east-1"
     ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
     
