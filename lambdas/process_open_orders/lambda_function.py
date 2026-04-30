@@ -6,17 +6,18 @@ import urllib.request
 from decimal import Decimal, InvalidOperation
 
 import boto3
-from boto3.dynamodb.conditions import Attr, Key
 from botocore.exceptions import ClientError
 
 
 dynamodb = boto3.resource('dynamodb')
 client = boto3.client('dynamodb')
+sqs = boto3.client('sqs')
 
 USER_TABLE = 'UserDB'
 PORTFOLIO_TABLE = 'PortfolioHoldings'
 TRANSACTIONS_TABLE = 'TransactionsDB'
-OPEN_ORDER_INDEX = 'StatusTickerIndex'
+DEFAULT_RETRY_DELAY_SECONDS = 60
+MAX_SQS_DELAY_SECONDS = 900
 
 
 class DecimalEncoder(json.JSONEncoder):
@@ -43,57 +44,23 @@ def to_decimal(value, default=None):
         return default
 
 
-def parse_event_payload(event):
-    if not event:
-        return {}
-    if isinstance(event.get('body'), str):
-        try:
-            return json.loads(event['body'], parse_float=Decimal)
-        except json.JSONDecodeError:
-            return {}
-    return event
+def get_retry_delay_seconds():
+    configured_delay = int(os.environ.get('ORDER_RETRY_DELAY_SECONDS', DEFAULT_RETRY_DELAY_SECONDS))
+    return max(0, min(configured_delay, MAX_SQS_DELAY_SECONDS))
 
 
-def parse_price_overrides(event):
-    payload = parse_event_payload(event)
-    raw_prices = payload.get('prices') or {}
-    return {
-        str(ticker).upper(): to_decimal(price)
-        for ticker, price in raw_prices.items()
-        if to_decimal(price) is not None and to_decimal(price) > 0
-    }
+def parse_message_body(record):
+    body = record.get('body', '{}')
+    if isinstance(body, dict):
+        return body
+    return json.loads(body)
 
 
-def get_open_orders():
-    orders = []
-    table = dynamodb.Table(TRANSACTIONS_TABLE)
-
-    try:
-        query_kwargs = {
-            'IndexName': OPEN_ORDER_INDEX,
-            'KeyConditionExpression': Key('status').eq('OPEN')
-        }
-        while True:
-            page = table.query(**query_kwargs)
-            orders.extend(page.get('Items', []))
-            if 'LastEvaluatedKey' not in page:
-                break
-            query_kwargs['ExclusiveStartKey'] = page['LastEvaluatedKey']
-        return orders
-    except ClientError as err:
-        if err.response.get('Error', {}).get('Code') != 'ValidationException':
-            raise
-
-    scan_kwargs = {
-        'FilterExpression': Attr('status').eq('OPEN')
-    }
-    while True:
-        page = table.scan(**scan_kwargs)
-        orders.extend(page.get('Items', []))
-        if 'LastEvaluatedKey' not in page:
-            break
-        scan_kwargs['ExclusiveStartKey'] = page['LastEvaluatedKey']
-    return orders
+def get_order(user_id, order_id):
+    result = dynamodb.Table(TRANSACTIONS_TABLE).get_item(
+        Key={'user_id': user_id, 'order_id': order_id}
+    )
+    return result.get('Item')
 
 
 def fetch_finnhub_price(ticker):
@@ -111,23 +78,6 @@ def fetch_finnhub_price(ticker):
         raise RuntimeError(f'Finnhub returned no current price for {ticker}')
 
     return current_price
-
-
-def get_current_prices(tickers, overrides):
-    prices = {}
-    errors = {}
-
-    for ticker in sorted(tickers):
-        if ticker in overrides:
-            prices[ticker] = overrides[ticker]
-            continue
-
-        try:
-            prices[ticker] = fetch_finnhub_price(ticker)
-        except Exception as err:
-            errors[ticker] = str(err)
-
-    return prices, errors
 
 
 def should_trigger(order, current_price):
@@ -151,6 +101,23 @@ def should_trigger(order, current_price):
             return current_price >= target_price
 
     return False
+
+
+def requeue_order(order, attempt):
+    queue_url = os.environ.get('OPEN_ORDERS_QUEUE_URL')
+    if not queue_url:
+        raise RuntimeError('OPEN_ORDERS_QUEUE_URL is not configured')
+
+    sqs.send_message(
+        QueueUrl=queue_url,
+        DelaySeconds=get_retry_delay_seconds(),
+        MessageBody=json.dumps({
+            'user_id': order['user_id'],
+            'order_id': order['order_id'],
+            'ticker': order['ticker'],
+            'attempt': attempt + 1
+        })
+    )
 
 
 def build_order_update(order, execution_price, current_price, timestamp):
@@ -251,68 +218,76 @@ def fill_order(order, current_price):
     }
 
 
+def process_order_message(message):
+    user_id = message.get('user_id')
+    order_id = message.get('order_id')
+    attempt = int(message.get('attempt', 1))
+
+    if not user_id or not order_id:
+        return {'status': 'skipped', 'reason': 'Missing user_id or order_id'}
+
+    order = get_order(user_id, order_id)
+    if not order:
+        return {'status': 'skipped', 'order_id': order_id, 'reason': 'Order not found'}
+
+    order_status = (order.get('status') or '').upper()
+    if order_status != 'OPEN':
+        return {
+            'status': 'skipped',
+            'order_id': order_id,
+            'reason': f'Order is {order_status or "missing status"}'
+        }
+
+    ticker = order.get('ticker')
+    current_price = fetch_finnhub_price(ticker)
+
+    if not should_trigger(order, current_price):
+        requeue_order(order, attempt)
+        return {
+            'status': 'requeued',
+            'order_id': order_id,
+            'ticker': ticker,
+            'attempt': attempt + 1,
+            'current_price': current_price,
+            'retry_delay_seconds': get_retry_delay_seconds()
+        }
+
+    return {'status': 'filled', 'order': fill_order(order, current_price)}
+
+
 def lambda_handler(event, context):
     try:
-        overrides = parse_price_overrides(event)
-        open_orders = get_open_orders()
-        tickers = {
-            str(order.get('ticker')).upper()
-            for order in open_orders
-            if order.get('ticker')
-        }
-        current_prices, price_errors = get_current_prices(tickers, overrides)
+        records = event.get('Records') or []
+        if not records:
+            return response(200, {'processed': 0, 'results': []})
 
-        filled = []
-        skipped = []
-        errors = []
+        results = []
+        failures = []
 
-        for order in open_orders:
-            ticker = str(order.get('ticker', '')).upper()
-            current_price = current_prices.get(ticker)
-
-            if current_price is None:
-                skipped.append({
-                    'order_id': order.get('order_id'),
-                    'ticker': ticker,
-                    'reason': price_errors.get(ticker, 'No current price available')
-                })
-                continue
-
-            if not should_trigger(order, current_price):
-                skipped.append({
-                    'order_id': order.get('order_id'),
-                    'ticker': ticker,
-                    'reason': 'Trigger condition not met',
-                    'current_price': current_price
-                })
-                continue
-
+        for record in records:
+            message_id = record.get('messageId')
             try:
-                filled.append(fill_order(order, current_price))
+                results.append(process_order_message(parse_message_body(record)))
             except ClientError as err:
-                errors.append({
-                    'order_id': order.get('order_id'),
-                    'ticker': ticker,
+                failures.append({'itemIdentifier': message_id})
+                results.append({
+                    'status': 'error',
+                    'message_id': message_id,
                     'error': err.response.get('Error', {}).get('Message', str(err))
                 })
             except Exception as err:
-                errors.append({
-                    'order_id': order.get('order_id'),
-                    'ticker': ticker,
+                failures.append({'itemIdentifier': message_id})
+                results.append({
+                    'status': 'error',
+                    'message_id': message_id,
                     'error': str(err)
                 })
 
-        return response(200, {
-            'checked': len(open_orders),
-            'filled_count': len(filled),
-            'skipped_count': len(skipped),
-            'error_count': len(errors),
-            'filled': filled,
-            'skipped': skipped,
-            'errors': errors,
-            'price_errors': price_errors
-        })
+        payload = {'processed': len(records), 'results': results}
+        if failures:
+            payload['batchItemFailures'] = failures
+        return payload
 
     except Exception as err:
-        print(f"Error processing open orders: {str(err)}")
+        print(f"Error processing order queue: {str(err)}")
         return response(500, {'error': str(err)})

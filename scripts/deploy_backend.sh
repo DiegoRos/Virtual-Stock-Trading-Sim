@@ -5,6 +5,10 @@
 
 ROLE_NAME="trading-simulator-lambda-role"
 TAG="trading-simulator"
+REGION="${AWS_REGION:-us-east-1}"
+API_ID="${API_ID:-dshwsohlu4}"
+QUEUE_NAME="${OPEN_ORDERS_QUEUE_NAME:-ts-open-orders-queue}"
+RETRY_DELAY_SECONDS="${ORDER_RETRY_DELAY_SECONDS:-60}"
 
 # Define Lambda functions to deploy
 # Format: "FunctionName:DirectoryName"
@@ -59,7 +63,24 @@ fi
 
 echo "Attaching policies to $ROLE_NAME..."
 aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::aws:policy/AmazonDynamoDBFullAccess"
+aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
 aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
+
+echo "Ensuring SQS queue: $QUEUE_NAME..."
+QUEUE_URL=$(aws sqs get-queue-url --queue-name "$QUEUE_NAME" --query 'QueueUrl' --output text 2>/dev/null)
+if [ -z "$QUEUE_URL" ]; then
+    QUEUE_URL=$(aws sqs create-queue \
+        --queue-name "$QUEUE_NAME" \
+        --attributes "VisibilityTimeout=90,ReceiveMessageWaitTimeSeconds=20" \
+        --tags "Project=$TAG" \
+        --query 'QueueUrl' \
+        --output text)
+fi
+QUEUE_ARN=$(aws sqs get-queue-attributes \
+    --queue-url "$QUEUE_URL" \
+    --attribute-names QueueArn \
+    --query 'Attributes.QueueArn' \
+    --output text)
 
 BACKEND_DIR="$(pwd)/lambdas"
 
@@ -80,6 +101,7 @@ for entry in "${LAMBDAS[@]}"; do
     if aws lambda get-function --function-name "$FUNC_NAME" >/dev/null 2>&1; then
         echo "Updating code for $FUNC_NAME..."
         aws lambda update-function-code --function-name "$FUNC_NAME" --zip-file "fileb://$ZIP_FILE" >/dev/null
+        aws lambda wait function-updated --function-name "$FUNC_NAME"
     else
         echo "Creating $FUNC_NAME (Architecture: arm64)..."
         aws lambda create-function \
@@ -92,14 +114,12 @@ for entry in "${LAMBDAS[@]}"; do
             --memory-size 128 \
             --timeout 10 \
             --tags "Project=$TAG" >/dev/null
+        aws lambda wait function-active --function-name "$FUNC_NAME"
     fi
     
     # Cleanup zip
     rm -f "$ZIP_FILE"
 
-    # Grant API Gateway Permission
-    API_ID="${API_ID:-dshwsohlu4}"
-    REGION="us-east-1"
     ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
     
     echo "Ensuring API Gateway permission for $FUNC_NAME..."
@@ -111,41 +131,55 @@ for entry in "${LAMBDAS[@]}"; do
         --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/*/*" \
         2>/dev/null || echo "Permission already exists for $FUNC_NAME."
 
-    if [ "$FUNC_NAME" == "ts-process-open-orders" ] && [ -n "$FINNHUB_API_KEY" ]; then
-        echo "Updating FINNHUB_API_KEY environment variable for $FUNC_NAME..."
+    if [ "$FUNC_NAME" == "ts-post-trade" ]; then
+        echo "Updating OPEN_ORDERS_QUEUE_URL environment variable for $FUNC_NAME..."
         aws lambda update-function-configuration \
             --function-name "$FUNC_NAME" \
-            --environment "Variables={FINNHUB_API_KEY=$FINNHUB_API_KEY}" >/dev/null
+            --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL}" >/dev/null
+        aws lambda wait function-updated --function-name "$FUNC_NAME"
+    fi
+
+    if [ "$FUNC_NAME" == "ts-process-open-orders" ]; then
+        echo "Updating queue processor environment variables for $FUNC_NAME..."
+        if [ -n "$FINNHUB_API_KEY" ]; then
+            aws lambda update-function-configuration \
+                --function-name "$FUNC_NAME" \
+                --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL,ORDER_RETRY_DELAY_SECONDS=$RETRY_DELAY_SECONDS,FINNHUB_API_KEY=$FINNHUB_API_KEY}" >/dev/null
+        else
+            aws lambda update-function-configuration \
+                --function-name "$FUNC_NAME" \
+                --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL,ORDER_RETRY_DELAY_SECONDS=$RETRY_DELAY_SECONDS}" >/dev/null
+        fi
+        aws lambda wait function-updated --function-name "$FUNC_NAME"
     fi
 done
 
 if [ -z "$TARGET" ] || [ "$TARGET" == "process_open_orders" ]; then
-    REGION="${REGION:-us-east-1}"
-    SCHEDULE_NAME="${ORDER_PROCESSOR_SCHEDULE_NAME:-ts-process-open-orders-every-minute}"
-    SCHEDULE_EXPRESSION="${ORDER_PROCESSOR_SCHEDULE:-rate(1 minute)}"
     PROCESSOR_FUNCTION="ts-process-open-orders"
 
-    echo "Configuring EventBridge schedule '$SCHEDULE_NAME' ($SCHEDULE_EXPRESSION)..."
-    aws events put-rule \
-        --name "$SCHEDULE_NAME" \
-        --schedule-expression "$SCHEDULE_EXPRESSION" \
-        --state ENABLED \
-        --tags "Key=Project,Value=$TAG" >/dev/null
-
-    RULE_ARN=$(aws events describe-rule --name "$SCHEDULE_NAME" --query 'Arn' --output text)
-    PROCESSOR_ARN=$(aws lambda get-function --function-name "$PROCESSOR_FUNCTION" --query 'Configuration.FunctionArn' --output text)
-
-    aws lambda add-permission \
+    echo "Ensuring SQS event source mapping for $PROCESSOR_FUNCTION..."
+    EXISTING_MAPPING=$(aws lambda list-event-source-mappings \
         --function-name "$PROCESSOR_FUNCTION" \
-        --statement-id "AllowExecutionFromEventBridge" \
-        --action "lambda:InvokeFunction" \
-        --principal "events.amazonaws.com" \
-        --source-arn "$RULE_ARN" \
-        2>/dev/null || echo "EventBridge permission already exists for $PROCESSOR_FUNCTION."
+        --event-source-arn "$QUEUE_ARN" \
+        --query 'EventSourceMappings[0].UUID' \
+        --output text 2>/dev/null)
 
-    aws events put-targets \
-        --rule "$SCHEDULE_NAME" \
-        --targets "Id"="1","Arn"="$PROCESSOR_ARN" >/dev/null
+    if [ -z "$EXISTING_MAPPING" ] || [ "$EXISTING_MAPPING" == "None" ]; then
+        aws lambda create-event-source-mapping \
+            --function-name "$PROCESSOR_FUNCTION" \
+            --event-source-arn "$QUEUE_ARN" \
+            --batch-size 1 \
+            --function-response-types ReportBatchItemFailures >/dev/null
+    else
+        echo "SQS event source mapping already exists for $PROCESSOR_FUNCTION."
+    fi
+
+    OLD_SCHEDULE_NAME="${ORDER_PROCESSOR_SCHEDULE_NAME:-ts-process-open-orders-every-minute}"
+    if aws events describe-rule --name "$OLD_SCHEDULE_NAME" >/dev/null 2>&1; then
+        echo "Disabling old EventBridge schedule '$OLD_SCHEDULE_NAME'..."
+        aws events remove-targets --rule "$OLD_SCHEDULE_NAME" --ids "1" >/dev/null 2>&1 || true
+        aws events disable-rule --name "$OLD_SCHEDULE_NAME" >/dev/null 2>&1 || true
+    fi
 fi
 
 echo "------------------------------------"

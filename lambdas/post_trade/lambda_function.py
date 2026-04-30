@@ -2,10 +2,12 @@ import json
 import boto3
 import uuid
 import datetime
+import os
 from decimal import Decimal
 
 dynamodb = boto3.resource('dynamodb')
 client = boto3.client('dynamodb')
+sqs = boto3.client('sqs')
 
 USER_TABLE = 'UserDB'
 PORTFOLIO_TABLE = 'PortfolioHoldings'
@@ -27,6 +29,21 @@ def get_user_id(event):
     if identity.get('userArn'):
         return identity['userArn'].split('/')[-1]
     return 'test-user'
+
+def enqueue_open_order(user_id, order_id, ticker):
+    queue_url = os.environ.get('OPEN_ORDERS_QUEUE_URL')
+    if not queue_url:
+        raise RuntimeError('OPEN_ORDERS_QUEUE_URL is not configured')
+
+    sqs.send_message(
+        QueueUrl=queue_url,
+        MessageBody=json.dumps({
+            'user_id': user_id,
+            'order_id': order_id,
+            'ticker': ticker,
+            'attempt': 1
+        })
+    )
 
 def lambda_handler(event, context):
     try:
@@ -225,6 +242,9 @@ def lambda_handler(event, context):
             })
 
         client.transact_write_items(TransactItems=transact_items)
+
+        if initial_status == 'OPEN':
+            enqueue_open_order(user_id, order_id, ticker)
 
         message = 'Trade executed successfully' if initial_status == 'FILLED' else 'Order queued successfully'
         return {
