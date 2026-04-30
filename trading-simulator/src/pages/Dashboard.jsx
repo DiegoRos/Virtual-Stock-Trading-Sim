@@ -1,5 +1,5 @@
 import React from 'react';
-import { TrendingUp, TrendingDown, AlertCircle } from 'lucide-react';
+import { TrendingUp, TrendingDown, AlertCircle, RefreshCw } from 'lucide-react';
 import WatchlistTable from '../components/WatchlistTable';
 
 const Dashboard = ({ 
@@ -12,11 +12,11 @@ const Dashboard = ({
   onFetchNews,
   marketData,
   userWatchlist, 
-  newWatchlistSymbol, 
-  setNewWatchlistSymbol, 
-  handleAddWatchlist, 
   onRemove,
-  onTrade 
+  onTrade,
+  token,
+  onAdd,
+  onRefresh,
 }) => {
   return (
     <div className="space-y-8 max-w-6xl mx-auto">
@@ -45,13 +45,12 @@ const Dashboard = ({
       {/* User Watchlist */}
       <WatchlistTable 
         userWatchlist={userWatchlist}
-        newWatchlistSymbol={newWatchlistSymbol}
-        setNewWatchlistSymbol={setNewWatchlistSymbol}
-        handleAddWatchlist={handleAddWatchlist}
         onRemove={onRemove}
         onTrade={onTrade}
+        token={token}
+        onAdd={onAdd}
+        onRefresh={onRefresh}
       />
-
       {/* Live News from API Gateway */}
       <div className="mt-8">
         <div className="flex items-center justify-between mb-4">
@@ -59,21 +58,22 @@ const Dashboard = ({
             <AlertCircle size={20} className="text-blue-400"/> AI Market Insights
           </h3>
           <div className="flex items-center gap-3">
-            <select
-              value={tradeTicker}
-              onChange={(e) => { setTradeTicker(e.target.value); onFetchNews(e.target.value); }}
-              className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
-            >
-              {Object.keys(marketData).map(sym => (
-                <option key={sym} value={sym}>{sym}</option>
-              ))}
-            </select>
-            <button
-              onClick={() => onFetchNews(tradeTicker)}
-              className="bg-slate-700 hover:bg-slate-600 text-white text-sm px-3 py-1.5 rounded-md transition-colors"
-            >
-              Refresh
-            </button>
+          <select
+            value={tradeTicker}
+            onChange={(e) => { setTradeTicker(e.target.value); onFetchNews(e.target.value); }}
+            className="bg-slate-800 border border-slate-700 rounded-md px-3 py-1.5 text-sm text-white focus:outline-none focus:border-blue-500"
+          >
+            {userWatchlist.map(stock => (
+              <option key={stock.symbol} value={stock.symbol}>{stock.symbol}</option>
+            ))}
+          </select>
+          <button
+            onClick={() => onFetchNews(tradeTicker)}
+            title="Refresh news"
+            className="text-slate-400 hover:text-white transition-colors"
+          >
+            <RefreshCw size={16} />
+          </button>
           </div>
         </div>
 

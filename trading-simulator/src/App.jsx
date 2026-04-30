@@ -148,6 +148,8 @@ export default function App() {
     }
   }, [authToken, mergeQuote]);
 
+
+
   const loadHistoryForSymbol = useCallback(async (symbol, range, options = {}) => {
     const normalized = normalizeSymbol(symbol);
     if (!normalized || !authToken) return null;
@@ -213,6 +215,11 @@ export default function App() {
     }
   }, [auth.isAuthenticated, auth.user?.profile?.email, authToken, loadQuotesForSymbols]);
 
+  const handleRefreshWatchlist = useCallback(async () => {
+    if (!userDB.watchlist?.length) return;
+    await loadQuotesForSymbols(userDB.watchlist);
+  }, [userDB.watchlist, loadQuotesForSymbols]);
+
   useEffect(() => {
     loadUserData();
   }, [loadUserData]);
@@ -264,20 +271,18 @@ export default function App() {
     }
   }, [loadHistoryForSymbol, loadQuoteForSymbol, navigate, timeframe, tradeTicker]);
 
-  const handleAddWatchlist = async (event) => {
-    event.preventDefault();
-    if (!newWatchlistSymbol.trim() || !authToken) return;
-    const symbol = normalizeSymbol(newWatchlistSymbol);
-
+  const handleAddWatchlist = async (symbol) => {
+    if (!symbol || !authToken) return;
+    const normalized = normalizeSymbol(symbol);
     try {
-      await loadQuoteForSymbol(symbol);
-      await api.addToWatchlist(symbol, authToken);
+      await loadQuoteForSymbol(normalized);
+      await api.addToWatchlist(normalized, authToken);
       await loadUserData();
-      setNewWatchlistSymbol('');
     } catch (err) {
       console.error('Failed to add to watchlist:', err);
     }
   };
+
 
   const handleRemoveWatchlist = async (ticker) => {
     if (!authToken) return;
@@ -502,11 +507,11 @@ export default function App() {
               setTradeTicker={setTradeTicker}
               onFetchNews={fetchNews}
               marketData={marketData}
-              newWatchlistSymbol={newWatchlistSymbol}
-              setNewWatchlistSymbol={setNewWatchlistSymbol}
-              handleAddWatchlist={handleAddWatchlist}
               onRemove={handleRemoveWatchlist}
               onTrade={(stock) => handleSymbolSelect(stock)}
+              token={authToken}
+              onAdd={handleAddWatchlist}
+              onRefresh={handleRefreshWatchlist}
             />
           )}
           />
