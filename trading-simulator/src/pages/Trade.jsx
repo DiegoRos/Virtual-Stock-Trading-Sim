@@ -1,10 +1,10 @@
-import React from 'react';
-import { Search, TrendingUp, TrendingDown, AlertCircle, CheckCircle2, Clock } from 'lucide-react';
+import React, { useState, useCallback, useMemo } from 'react';
+import { AlertCircle, CheckCircle2, Clock, Loader2, TrendingDown, TrendingUp } from 'lucide-react';
 import StockChart from '../components/StockChart';
+import StockSearchInput from '../components/StockSearchInput';
 
 const Trade = ({
   tradeTicker,
-  setTradeTicker,
   marketData,
   chartData,
   timeframe,
@@ -19,7 +19,14 @@ const Trade = ({
   setTradeQuantity,
   handleTrade,
   currentCash,
-  openOrders = []
+  openOrders = [],
+  authToken,
+  onSymbolSelect,
+  quoteLoading,
+  quoteError,
+  quoteReady,
+  chartLoading,
+  chartError
 }) => {
   const selectedStock = marketData[tradeTicker];
   const queuedPrice = orderType !== 'MARKET' ? parseFloat(targetPrice) : null;
@@ -27,6 +34,40 @@ const Trade = ({
   const estimatedCost = Number.isFinite(estimatedPrice)
     ? (estimatedPrice * (parseInt(tradeQuantity) || 0)).toFixed(2)
     : '--';
+  const currentPrice = Number(selectedStock?.price || 0);
+  const tradeDisabled = !quoteReady || quoteLoading;
+
+  const [hoveredPoint, setHoveredPoint] = useState(null);
+
+  const handleHover = useCallback((point) => setHoveredPoint(point), []);
+  const handleLeave = useCallback(() => setHoveredPoint(null), []);
+
+  // % change computed from chart data for the selected timeframe
+  const chartChangePercent = useMemo(() => {
+    if (!chartData || chartData.length < 2) return null;
+    const first = chartData[0].price;
+    const last = chartData[chartData.length - 1].price;
+    if (!first || first === 0) return null;
+    return ((last - first) / first) * 100;
+  }, [chartData]);
+
+  // % change to hovered point (relative to first chart point)
+  const hoveredChangePercent = useMemo(() => {
+    if (!hoveredPoint || !chartData || chartData.length < 1) return null;
+    const first = chartData[0].price;
+    if (!first || first === 0) return null;
+    return ((hoveredPoint.price - first) / first) * 100;
+  }, [hoveredPoint, chartData]);
+
+  const currentChange = chartChangePercent ?? Number(selectedStock?.change || 0);
+  const displayPrice = hoveredPoint ? hoveredPoint.price : currentPrice;
+  const displayPercent = hoveredPoint !== null ? hoveredChangePercent : chartChangePercent;
+  const displayTime = hoveredPoint
+    ? new Date(hoveredPoint.timestamp).toLocaleString([], {
+        month: 'short', day: 'numeric',
+        hour: '2-digit', minute: '2-digit'
+      })
+    : null;
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -37,20 +78,41 @@ const Trade = ({
         <div className="flex flex-col md:flex-row justify-between items-start md:items-end mb-6 gap-4">
           <div>
             <h3 className="text-4xl font-bold text-white tracking-tight">{tradeTicker}</h3>
-            <p className="text-slate-400 text-lg">{marketData[tradeTicker]?.name || 'Unknown Company'}</p>
+            <p className="text-slate-400 text-lg">{selectedStock?.name || 'Unknown Company'}</p>
           </div>
           <div className="text-left md:text-right">
-            <p className="text-4xl font-bold text-white">${marketData[tradeTicker]?.price.toFixed(2) || '0.00'}</p>
-            <p className={`text-lg flex items-center md:justify-end gap-1 font-medium ${marketData[tradeTicker]?.change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-              {marketData[tradeTicker]?.change >= 0 ? <TrendingUp size={20}/> : <TrendingDown size={20}/>}
-              {marketData[tradeTicker]?.change > 0 ? '+' : ''}{marketData[tradeTicker]?.change}%
-            </p>
+            <p className="text-4xl font-bold text-white">${displayPrice.toFixed(2)}</p>
+            {displayPercent !== null ? (
+              <p className={`text-lg flex items-center md:justify-end gap-1 font-medium ${displayPercent >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {displayPercent >= 0 ? <TrendingUp size={20}/> : <TrendingDown size={20}/>}
+                {displayPercent > 0 ? '+' : ''}{displayPercent.toFixed(2)}%
+              </p>
+            ) : null}
+            {displayTime && <p className="text-xs text-slate-400 mt-1">{displayTime}</p>}
+            {selectedStock?.stale && !displayTime && <p className="text-xs text-yellow-400 mt-1">Using cached quote</p>}
           </div>
         </div>
 
         {/* Chart SVG wrapper */}
         <div className="h-72 w-full mb-6 border-b border-slate-700 pb-6 relative">
-          <StockChart data={chartData} timeframe={timeframe} />
+          {chartLoading && (
+            <div className="absolute inset-0 flex items-center justify-center text-slate-400 text-sm">
+              <Loader2 size={18} className="animate-spin mr-2" /> Loading chart...
+            </div>
+          )}
+          {!chartLoading && chartError && (
+            <div className="absolute inset-0 flex items-center justify-center text-red-400 text-sm">
+              {chartError}
+            </div>
+          )}
+          {!chartLoading && !chartError && (
+            <StockChart
+              data={chartData}
+              timeframe={timeframe}
+              onHover={handleHover}
+              onLeave={handleLeave}
+            />
+          )}
         </div>
 
         {/* Timeframe Selectors */}
@@ -82,21 +144,23 @@ const Trade = ({
             <CheckCircle2 size={20} /> <p className="text-sm">{tradeSuccess}</p>
           </div>
         )}
+        {quoteError && (
+          <div className="mb-6 p-4 bg-yellow-900/30 border border-yellow-500/50 rounded-lg flex items-center gap-3 text-yellow-300">
+            <AlertCircle size={20} /> <p className="text-sm">{quoteError}</p>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
           {/* Order Form */}
           <div className="space-y-5">
             <div>
               <label className="block text-sm text-slate-400 mb-2">Symbol</label>
-              <div className="relative">
-                <Search className="absolute left-3 top-3 text-slate-500" size={18} />
-                <input
-                  type="text"
-                  value={tradeTicker}
-                  onChange={(e) => setTradeTicker(e.target.value.toUpperCase())}
-                  className="w-full bg-slate-900 border border-slate-600 rounded-lg pl-10 pr-4 py-2.5 text-white font-mono uppercase focus:outline-none focus:border-blue-500"
-                />
-              </div>
+              <StockSearchInput
+                value={tradeTicker}
+                token={authToken}
+                onSelect={onSymbolSelect}
+                placeholder="Search ticker or company"
+              />
             </div>
 
             <div>
@@ -137,10 +201,18 @@ const Trade = ({
             </div>
 
             <div className="flex gap-4 pt-4">
-              <button onClick={() => handleTrade('BUY')} className="flex-1 bg-green-600 hover:bg-green-700 text-white font-bold py-3 rounded-lg transition-colors">
+              <button
+                onClick={() => handleTrade('BUY')}
+                disabled={tradeDisabled}
+                className="flex-1 bg-green-600 hover:bg-green-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
+              >
                 BUY
               </button>
-              <button onClick={() => handleTrade('SELL')} className="flex-1 bg-red-600 hover:bg-red-700 text-white font-bold py-3 rounded-lg transition-colors">
+              <button
+                onClick={() => handleTrade('SELL')}
+                disabled={tradeDisabled}
+                className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
+              >
                 SELL
               </button>
             </div>
@@ -153,9 +225,9 @@ const Trade = ({
               {marketData[tradeTicker] ? (
                 <div className="space-y-4">
                   <div>
-                    <p className="text-3xl font-bold text-white">${marketData[tradeTicker].price.toFixed(2)}</p>
-                    <p className={`text-sm ${marketData[tradeTicker].change >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                      {marketData[tradeTicker].change > 0 ? '+' : ''}{marketData[tradeTicker].change}% Today
+                    <p className="text-3xl font-bold text-white">${currentPrice.toFixed(2)}</p>
+                    <p className={`text-sm ${currentChange >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                      {currentChange > 0 ? '+' : ''}{currentChange.toFixed(2)}% ({timeframe})
                     </p>
                   </div>
                   <div className="pt-4 border-t border-slate-700">

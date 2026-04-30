@@ -226,4 +226,5 @@ swagger.local.yaml
 GEMINI.md
 *.pdf
 scripts/*
+!scripts/audit_aws_setup.sh
 *.zip
