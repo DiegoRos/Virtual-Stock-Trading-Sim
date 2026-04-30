@@ -36,9 +36,9 @@ const Portfolio = ({ portfolio, marketData, handleDownloadCSV, onTrade }) => {
                   const marketValue = currentPrice * pos.quantity;
                   const costBasis = pos.average_buy_price * pos.quantity;
                   const pnl = marketValue - costBasis;
-                  const pnlPercent = (pnl / costBasis) * 100;
+                  const pnlPercent = costBasis > 0 ? (pnl / costBasis) * 100 : 0;
                   const isPositive = pnl >= 0;
-                  
+
                   return (
                     <tr key={pos.ticker} className="bg-[#0B1120] hover:bg-slate-800/50 transition-colors group">
                       <td className="p-5 font-bold text-white text-base">{pos.ticker}</td>

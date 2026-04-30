@@ -49,7 +49,7 @@ const WatchlistTable = ({
                 {userWatchlist.map((stock) => (
                   <tr key={stock.symbol} className="bg-[#0B1120] hover:bg-slate-800/50 transition-colors group">
                     <td className="p-4 font-bold text-white">{stock.symbol}</td>
-                    <td className="p-4 text-slate-200">${stock.price.toFixed(2)}</td>
+                    <td className="p-4 text-slate-200">{stock.price > 0 ? `$${stock.price.toFixed(2)}` : '--'}</td>
                     <td className="p-4">
                       <div className="flex flex-col">
                         <span className={`font-medium ${stock.change >= 0 ? 'text-[#22c55e]' : 'text-[#ef4444]'}`}>
@@ -62,9 +62,10 @@ const WatchlistTable = ({
                     </td>
                     <td className="p-4 text-center">
                       <div className="flex items-center justify-center gap-4">
-                        <button 
-                          onClick={() => onTrade(stock)} 
-                          className="text-[#3b82f6] hover:text-blue-300 transition-colors font-bold text-xs tracking-wide"
+                        <button
+                          onClick={() => onTrade(stock)}
+                          disabled={stock.price <= 0}
+                          className="text-[#3b82f6] hover:text-blue-300 disabled:text-slate-600 disabled:cursor-not-allowed transition-colors font-bold text-xs tracking-wide"
                         >
                           TRADE
                         </button>
