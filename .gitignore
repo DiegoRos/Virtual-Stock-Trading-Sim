@@ -223,7 +223,11 @@ Thumbs.db
 # API Documentation
 swagger.local.yaml
 
+# Copilot / Claude settings
+.claude/
+
 GEMINI.md
 *.pdf
 scripts/*
+!scripts/audit_aws_setup.sh
 *.zip

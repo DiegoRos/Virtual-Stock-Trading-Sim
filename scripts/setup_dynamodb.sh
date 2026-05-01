@@ -70,12 +70,24 @@ create_table "PortfolioHoldings" \
     '{"ReadCapacityUnits":1,"WriteCapacityUnits":1}'
 
 # 4. NewsCacheDB
-# PK: ticker (S), SK: date (S)
-# Note: Name changed from 'News/Cache DB' to 'NewsCacheDB' to comply with DynamoDB naming rules.
+# PK: symbol (S), SK: timestamp (S)
 create_table "NewsCacheDB" \
-    '[{"AttributeName":"ticker","AttributeType":"S"},{"AttributeName":"date","AttributeType":"S"}]' \
-    '[{"AttributeName":"ticker","KeyType":"HASH"},{"AttributeName":"date","KeyType":"RANGE"}]' \
+    '[{"AttributeName":"symbol","AttributeType":"S"},{"AttributeName":"timestamp","AttributeType":"S"}]' \
+    '[{"AttributeName":"symbol","KeyType":"HASH"},{"AttributeName":"timestamp","KeyType":"RANGE"}]' \
     '{"ReadCapacityUnits":1,"WriteCapacityUnits":1}'
+
+# 5. MarketDataCache
+# PK: cache_key (S), TTL attribute: expires_at
+create_table "MarketDataCache" \
+    '[{"AttributeName":"cache_key","AttributeType":"S"}]' \
+    '[{"AttributeName":"cache_key","KeyType":"HASH"}]' \
+    '{"ReadCapacityUnits":1,"WriteCapacityUnits":1}'
+
+echo "Enabling TTL on MarketDataCache.expires_at..."
+aws dynamodb update-time-to-live \
+    --table-name "MarketDataCache" \
+    --time-to-live-specification "Enabled=true,AttributeName=expires_at" \
+    >/dev/null 2>&1 || echo "TTL may already be enabled or the table may still be creating."
 
 echo "--------------------------------------------------------"
 echo "DynamoDB setup script execution finished."
