@@ -331,12 +331,12 @@ def process_order_message(message):
     # Check Market Status before fetching price
     market_open, suggested_delay = get_market_status()
     if not market_open:
-        requeue_order(order, attempt, delay=suggested_delay)
+        # Instead of requeueing, we drop the message from SQS.
+        # The "market_open_trigger" sweeper will re-populate the queue at 9:30 AM EST.
         return {
             'status': 'market_closed',
             'order_id': order_id,
-            'reason': 'Market is closed, requeued for next trading window',
-            'delay_seconds': suggested_delay
+            'reason': 'Market is closed, message dropped. Sweeper will re-enqueue at market open.'
         }
 
     ticker = order.get('ticker')

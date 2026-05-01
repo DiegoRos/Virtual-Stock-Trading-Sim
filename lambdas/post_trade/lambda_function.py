@@ -30,6 +30,26 @@ def get_user_id(event):
         return identity['userArn'].split('/')[-1]
     return 'test-user'
 
+def get_market_status():
+    """
+    Checks if the market is currently open (Mon-Fri, 9:30 AM - 4:00 PM EST).
+    Note: May 2026 is in Daylight Savings Time (EDT, UTC-4).
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    # Eastern Time (EDT) is UTC-4
+    now_est = now_utc - datetime.timedelta(hours=4)
+    
+    is_weekend = now_est.weekday() >= 5
+    # 9:30 AM is 9.5 hours into the day
+    current_time_float = now_est.hour + (now_est.minute / 60.0)
+    is_trading_hours = 9.5 <= current_time_float < 16.0
+    
+    if not is_weekend and is_trading_hours:
+        return True, 0
+    
+    # If closed, recommend 15-minute delay (SQS Max)
+    return False, 900
+
 def enqueue_open_order(user_id, order_id, ticker):
     queue_url = os.environ.get('OPEN_ORDERS_QUEUE_URL')
     if not queue_url:
@@ -284,10 +304,14 @@ def lambda_handler(event, context):
 
         client.transact_write_items(TransactItems=transact_items)
 
-        if initial_status == 'OPEN':
+        # Only enqueue to SQS if the market is currently open.
+        # Otherwise, the "market_open_trigger" sweeper will handle it later.
+        market_open, _ = get_market_status()
+
+        if initial_status == 'OPEN' and market_open:
             enqueue_open_order(user_id, order_id, ticker)
         
-        if is_stop_loss_buy:
+        if is_stop_loss_buy and market_open:
             enqueue_open_order(user_id, sell_order_id, ticker)
 
         message = 'Trade executed successfully' if initial_status == 'FILLED' else 'Order queued successfully'
