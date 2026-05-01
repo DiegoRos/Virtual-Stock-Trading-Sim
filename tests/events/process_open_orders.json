@@ -1,0 +1,8 @@
+{
+  "Records": [
+    {
+      "messageId": "test-message-id",
+      "body": "{\"user_id\": \"test-user\", \"order_id\": \"test-order-id\", \"ticker\": \"TSLA\", \"attempt\": 1}"
+    }
+  ]
+}
