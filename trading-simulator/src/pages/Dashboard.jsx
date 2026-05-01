@@ -131,7 +131,7 @@ const Dashboard = ({
                       rel="noopener noreferrer"
                       className="text-blue-400 hover:text-blue-300 text-xs transition-colors"
                     >
-                      Read more -&gt;
+                      Read more →
                     </a>
                   )}
                   {item.timestamp && (

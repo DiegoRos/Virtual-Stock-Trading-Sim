@@ -30,7 +30,7 @@ const MARKET_WATCH = [
   { symbol: 'Crude Oil', price: 85.30, change: 1.15, percent: 1.37 },
 ];
 
-const NEWS_API_BASE_URL = import.meta.env.VITE_NEWS_API_BASE_URL || 'https://9k0gvdwbp6.execute-api.us-east-1.amazonaws.com/dev';
+// const NEWS_API_BASE_URL = import.meta.env.VITE_NEWS_API_BASE_URL || 'https://9k0gvdwbp6.execute-api.us-east-1.amazonaws.com/dev';
 
 const normalizeSymbol = (value) => String(value || '').trim().toUpperCase().replace('.', '-');
 const toNumber = (value, fallback = 0) => {
@@ -234,10 +234,11 @@ export default function App() {
     setNewsLoading(true);
     setNewsError('');
     try {
-      const baseUrl = NEWS_API_BASE_URL.replace(/\/$/, '');
-      const response = await fetch(`${baseUrl}/news?symbol=${encodeURIComponent(symbol)}&limit=5`);
-      if (!response.ok) throw new Error('Failed to fetch news');
-      const data = await response.json();
+      // const baseUrl = NEWS_API_BASE_URL.replace(/\/$/, '');
+      // const response = await fetch(`${baseUrl}/news?symbol=${encodeURIComponent(symbol)}&limit=5`);
+      const response = await api.getNews(symbol);
+      console.log(response)
+      const data = response;
       setNews(Array.isArray(data) ? data : []);
     } catch (err) {
       setNewsError('Could not load news. Please try again later.');

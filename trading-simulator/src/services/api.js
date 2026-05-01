@@ -29,7 +29,6 @@ const readPayload = async (response) => {
   } catch {
     return { message: text };
   }
-
   return response.json();
 };
 
@@ -80,4 +79,5 @@ export const api = {
   removeFromWatchlist: (ticker, token) => apiRequest(`/watchlist?ticker=${encodeURIComponent(ticker)}`, { method: 'DELETE', token }),
   getOrders: (token) => apiRequest('/orders', { token }),
   cancelOrder: (orderId, token) => apiRequest(`/orders/${encodeURIComponent(orderId)}`, { method: 'DELETE', token }),
+  getNews: (symbol) => apiRequest(`/news?symbol=${encodeURIComponent(symbol)}`),
 };
