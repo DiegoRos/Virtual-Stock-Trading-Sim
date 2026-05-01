@@ -108,12 +108,20 @@ def lambda_handler(event, context):
                 'body': json.dumps({'error': 'Target price is required for LIMIT and STOP_LOSS orders'})
             }
 
-        order_price = price if order_type == 'MARKET' else target_price
+        # Handle compound STOP_LOSS BUY: Buy at market immediately, then place STOP_LOSS SELL
+        is_stop_loss_buy = (order_type == 'STOP_LOSS' and side == 'BUY')
+        
+        if is_stop_loss_buy:
+            order_price = price  # Use current market price for the initial buy
+            initial_status = 'FILLED'
+        else:
+            order_price = price if order_type == 'MARKET' else target_price
+            initial_status = 'FILLED' if order_type == 'MARKET' else 'OPEN'
+
         total_cost = quantity * order_price
         order_id = str(uuid.uuid4())
         timestamp = datetime.datetime.utcnow().isoformat()
         
-        initial_status = 'FILLED' if order_type == 'MARKET' else 'OPEN'
         transaction_item = {
             'user_id': {'S': user_id},
             'order_id': {'S': order_id},
@@ -123,13 +131,32 @@ def lambda_handler(event, context):
             'side': {'S': side},
             'status': {'S': initial_status},
             'timestamp': {'S': timestamp},
-            'type': {'S': order_type}
+            'type': {'S': 'MARKET' if is_stop_loss_buy else order_type}
         }
+        
         if initial_status == 'FILLED':
             transaction_item['execution_price'] = {'N': str(price)}
         else:
             transaction_item['target_price'] = {'N': str(order_price)}
             transaction_item['quote_price'] = {'N': str(quote_price)}
+
+        # Prepare second order for Stop Loss Buy if needed
+        sell_order_id = None
+        if is_stop_loss_buy:
+            sell_order_id = str(uuid.uuid4())
+            sell_transaction_item = {
+                'user_id': {'S': user_id},
+                'order_id': {'S': sell_order_id},
+                'ticker': {'S': ticker},
+                'quantity': {'N': str(quantity)},
+                'target_price': {'N': str(target_price)},
+                'price': {'N': str(target_price)},
+                'quote_price': {'N': str(quote_price)},
+                'side': {'S': 'SELL'},
+                'status': {'S': 'OPEN'},
+                'timestamp': {'S': timestamp},
+                'type': {'S': 'STOP_LOSS'}
+            }
 
         if side == 'BUY':
             # Check if user has enough cash
@@ -155,9 +182,6 @@ def lambda_handler(event, context):
             ]
 
             if initial_status == 'FILLED':
-                # Since DynamoDB doesn't support complex math in UpdateExpressions, 
-                # we fetch current holdings to calculate new average price.
-                # In a high-concurrency app, we'd use optimistic locking here.
                 portfolio_res = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
                 item = portfolio_res.get('Item', {})
                 old_qty = item.get('quantity', Decimal('0'))
@@ -166,15 +190,23 @@ def lambda_handler(event, context):
                 new_qty = old_qty + quantity
                 new_avg = ((old_avg * old_qty) + total_cost) / new_qty
 
+                update_expr = 'SET quantity = :nq, average_buy_price = :navg'
+                expr_vals = {
+                    ':nq': {'N': str(new_qty)},
+                    ':navg': {'N': str(new_avg)}
+                }
+                
+                if is_stop_loss_buy:
+                    update_expr += ', reserved_quantity = if_not_exists(reserved_quantity, :zero) + :qty'
+                    expr_vals[':qty'] = {'N': str(quantity)}
+                    expr_vals[':zero'] = {'N': '0'}
+
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-                        'UpdateExpression': 'SET quantity = :nq, average_buy_price = :navg',
-                        'ExpressionAttributeValues': {
-                            ':nq': {'N': str(new_qty)},
-                            ':navg': {'N': str(new_avg)}
-                        }
+                        'UpdateExpression': update_expr,
+                        'ExpressionAttributeValues': expr_vals
                     }
                 })
 
@@ -184,26 +216,35 @@ def lambda_handler(event, context):
                     'Item': transaction_item
                 }
             })
+            
+            if is_stop_loss_buy:
+                transact_items.append({
+                    'Put': {
+                        'TableName': TRANSACTIONS_TABLE,
+                        'Item': sell_transaction_item
+                    }
+                })
 
         elif side == 'SELL':
-            # Check if user has enough shares
+            # Check if user has enough shares (Available = Quantity - Reserved)
             portfolio_response = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
             item = portfolio_response.get('Item', {})
             current_qty = item.get('quantity', Decimal('0'))
+            reserved_qty = item.get('reserved_quantity', Decimal('0'))
             avg_buy_price = item.get('average_buy_price', Decimal('0'))
 
-            if 'Item' not in portfolio_response or current_qty < quantity:
+            if 'Item' not in portfolio_response or (current_qty - reserved_qty) < quantity:
                 return {
                     'statusCode': 400,
                     'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-                    'body': json.dumps({'error': 'Insufficient shares'})
+                    'body': json.dumps({'error': 'Insufficient available shares'})
                 }
 
             transact_items = []
-
             transaction_item['average_buy_price'] = {'N': str(avg_buy_price)}
             
             if initial_status == 'FILLED':
+                # Immediate Cash Gain
                 transact_items.append({
                     'Update': {
                         'TableName': USER_TABLE,
@@ -212,25 +253,25 @@ def lambda_handler(event, context):
                         'ExpressionAttributeValues': {':gain': {'N': str(total_cost)}}
                     }
                 })
-            
-            # If we are selling all shares (or locking all shares for a limit order), delete the entry
-            if current_qty == quantity:
-                transact_items.append({
-                    'Delete': {
-                        'TableName': PORTFOLIO_TABLE,
-                        'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-                        'ConditionExpression': 'quantity = :qty',
-                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}}
-                    }
-                })
-            else:
+                # Immediate Share Deduction
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
                         'UpdateExpression': 'SET quantity = quantity - :qty',
-                        'ConditionExpression': 'quantity >= :qty',
-                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}}
+                        'ConditionExpression': 'quantity - if_not_exists(reserved_quantity, :zero) >= :qty',
+                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}, ':zero': {'N': '0'}}
+                    }
+                })
+            else:
+                # OPEN Order: Increment reserved_quantity
+                transact_items.append({
+                    'Update': {
+                        'TableName': PORTFOLIO_TABLE,
+                        'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
+                        'UpdateExpression': 'SET reserved_quantity = if_not_exists(reserved_quantity, :zero) + :qty',
+                        'ConditionExpression': 'quantity - if_not_exists(reserved_quantity, :zero) >= :qty',
+                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}, ':zero': {'N': '0'}}
                     }
                 })
 
@@ -245,12 +286,19 @@ def lambda_handler(event, context):
 
         if initial_status == 'OPEN':
             enqueue_open_order(user_id, order_id, ticker)
+        
+        if is_stop_loss_buy:
+            enqueue_open_order(user_id, sell_order_id, ticker)
 
         message = 'Trade executed successfully' if initial_status == 'FILLED' else 'Order queued successfully'
+        response_body = {'message': message, 'order_id': order_id, 'status': initial_status}
+        if is_stop_loss_buy:
+            response_body['sell_order_id'] = sell_order_id
+
         return {
             'statusCode': 200,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
-            'body': json.dumps({'message': message, 'order_id': order_id, 'status': initial_status})
+            'body': json.dumps(response_body)
         }
 
     except Exception as e:

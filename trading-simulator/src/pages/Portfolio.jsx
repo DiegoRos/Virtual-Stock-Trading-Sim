@@ -42,7 +42,14 @@ const Portfolio = ({ portfolio, marketData, handleDownloadCSV, onTrade }) => {
                   return (
                     <tr key={pos.ticker} className="bg-[#0B1120] hover:bg-slate-800/50 transition-colors group">
                       <td className="p-5 font-bold text-white text-base">{pos.ticker}</td>
-                      <td className="p-5 text-slate-200">{pos.quantity}</td>
+                      <td className="p-5 text-slate-200">
+                        {pos.quantity}
+                        {pos.reserved_quantity > 0 && (
+                          <span className="text-[10px] text-slate-500 block">
+                            ({pos.reserved_quantity} Reserved)
+                          </span>
+                        )}
+                      </td>
                       <td className="p-5 text-slate-200">${pos.average_buy_price.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                       <td className="p-5 text-slate-200">${currentPrice.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>
                       <td className="p-5 font-medium text-slate-200">${marketValue.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2})}</td>

@@ -198,19 +198,85 @@ def build_buy_fill_updates(order, execution_price):
 
 def build_sell_fill_updates(order, execution_price):
     user_id = order['user_id']
+    ticker = order['ticker']
     quantity = to_decimal(order.get('quantity'), Decimal('0'))
     proceeds = quantity * execution_price
 
-    return {
-        'Update': {
-            'TableName': USER_TABLE,
-            'Key': {'user_id': {'S': user_id}},
-            'UpdateExpression': 'SET current_cash = current_cash + :proceeds',
-            'ExpressionAttributeValues': {
-                ':proceeds': {'N': str(proceeds)}
+    return [
+        {
+            'Update': {
+                'TableName': USER_TABLE,
+                'Key': {'user_id': {'S': user_id}},
+                'UpdateExpression': 'SET current_cash = current_cash + :proceeds',
+                'ExpressionAttributeValues': {
+                    ':proceeds': {'N': str(proceeds)}
+                }
+            }
+        },
+        {
+            'Update': {
+                'TableName': PORTFOLIO_TABLE,
+                'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
+                'UpdateExpression': 'SET quantity = quantity - :qty, reserved_quantity = reserved_quantity - :qty',
+                'ConditionExpression': 'quantity >= :qty AND reserved_quantity >= :qty',
+                'ExpressionAttributeValues': {
+                    ':qty': {'N': str(quantity)}
+                }
             }
         }
-    }
+    ]
+
+
+def cancel_order(order, reason):
+    user_id = order['user_id']
+    order_id = order['order_id']
+    ticker = order['ticker']
+    side = (order.get('side') or order.get('trade_action') or '').upper()
+    quantity = to_decimal(order.get('quantity'), Decimal('0'))
+    timestamp = datetime.datetime.utcnow().isoformat()
+
+    transact_items = [
+        {
+            'Update': {
+                'TableName': TRANSACTIONS_TABLE,
+                'Key': {'user_id': {'S': user_id}, 'order_id': {'S': order_id}},
+                'UpdateExpression': 'SET #s = :cancelled, cancel_reason = :reason, cancelled_at = :cat',
+                'ConditionExpression': '#s = :open',
+                'ExpressionAttributeNames': {'#s': 'status'},
+                'ExpressionAttributeValues': {
+                    ':cancelled': {'S': 'CANCELED'},
+                    ':open': {'S': 'OPEN'},
+                    ':reason': {'S': reason},
+                    ':cat': {'S': timestamp}
+                }
+            }
+        }
+    ]
+
+    if side == 'SELL':
+        transact_items.append({
+            'Update': {
+                'TableName': PORTFOLIO_TABLE,
+                'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
+                'UpdateExpression': 'SET reserved_quantity = reserved_quantity - :qty',
+                'ConditionExpression': 'reserved_quantity >= :qty',
+                'ExpressionAttributeValues': {':qty': {'N': str(quantity)}}
+            }
+        })
+    elif side == 'BUY':
+        execution_price = to_decimal(order.get('target_price') or order.get('price'))
+        total_cost = quantity * execution_price
+        transact_items.append({
+            'Update': {
+                'TableName': USER_TABLE,
+                'Key': {'user_id': {'S': user_id}},
+                'UpdateExpression': 'SET current_cash = current_cash + :cost',
+                'ExpressionAttributeValues': {':cost': {'N': str(total_cost)}}
+            }
+        })
+
+    client.transact_write_items(TransactItems=transact_items)
+    return {'order_id': order_id, 'status': 'CANCELED', 'reason': reason}
 
 
 def fill_order(order, current_price):
@@ -223,7 +289,7 @@ def fill_order(order, current_price):
     if side == 'BUY':
         transact_items.append(build_buy_fill_updates(order, execution_price))
     elif side == 'SELL':
-        transact_items.append(build_sell_fill_updates(order, execution_price))
+        transact_items.extend(build_sell_fill_updates(order, execution_price))
     else:
         raise ValueError(f"Unsupported side '{side}'")
 
@@ -274,6 +340,16 @@ def process_order_message(message):
         }
 
     ticker = order.get('ticker')
+    side = (order.get('side') or order.get('trade_action') or '').upper()
+
+    # Defensive Check for SELL orders: Ensure user still owns the shares
+    if side == 'SELL':
+        portfolio_res = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
+        item = portfolio_res.get('Item', {})
+        current_qty = to_decimal(item.get('quantity'), Decimal('0'))
+        if current_qty < to_decimal(order.get('quantity'), Decimal('0')):
+            return {'status': 'canceled', 'result': cancel_order(order, 'Insufficient shares at time of execution')}
+
     current_price = fetch_finnhub_price(ticker)
 
     if not should_trigger(order, current_price):
