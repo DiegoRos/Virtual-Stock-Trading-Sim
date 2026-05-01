@@ -16,7 +16,7 @@ sqs = boto3.client('sqs')
 USER_TABLE = 'UserDB'
 PORTFOLIO_TABLE = 'PortfolioHoldings'
 TRANSACTIONS_TABLE = 'TransactionsDB'
-DEFAULT_RETRY_DELAY_SECONDS = 60
+DEFAULT_RETRY_DELAY_SECONDS = 300
 MAX_SQS_DELAY_SECONDS = 900
 
 
@@ -42,6 +42,27 @@ def to_decimal(value, default=None):
         return Decimal(str(value))
     except (InvalidOperation, ValueError):
         return default
+
+
+def get_market_status():
+    """
+    Checks if the market is currently open (Mon-Fri, 9:30 AM - 4:00 PM EST).
+    Note: May 2026 is in Daylight Savings Time (EDT, UTC-4).
+    """
+    now_utc = datetime.datetime.now(datetime.timezone.utc)
+    # Eastern Time (EDT) is UTC-4
+    now_est = now_utc - datetime.timedelta(hours=4)
+    
+    is_weekend = now_est.weekday() >= 5
+    # 9:30 AM is 9.5 hours into the day
+    current_time_float = now_est.hour + (now_est.minute / 60.0)
+    is_trading_hours = 9.5 <= current_time_float < 16.0
+    
+    if not is_weekend and is_trading_hours:
+        return True, 0
+    
+    # If closed, recommend 15-minute delay (SQS Max)
+    return False, 900
 
 
 def get_retry_delay_seconds():
@@ -103,14 +124,17 @@ def should_trigger(order, current_price):
     return False
 
 
-def requeue_order(order, attempt):
+def requeue_order(order, attempt, delay=None):
     queue_url = os.environ.get('OPEN_ORDERS_QUEUE_URL')
     if not queue_url:
         raise RuntimeError('OPEN_ORDERS_QUEUE_URL is not configured')
 
+    if delay is None:
+        delay = get_retry_delay_seconds()
+
     sqs.send_message(
         QueueUrl=queue_url,
-        DelaySeconds=get_retry_delay_seconds(),
+        DelaySeconds=delay,
         MessageBody=json.dumps({
             'user_id': order['user_id'],
             'order_id': order['order_id'],
@@ -236,6 +260,17 @@ def process_order_message(message):
             'status': 'skipped',
             'order_id': order_id,
             'reason': f'Order is {order_status or "missing status"}'
+        }
+
+    # Check Market Status before fetching price
+    market_open, suggested_delay = get_market_status()
+    if not market_open:
+        requeue_order(order, attempt, delay=suggested_delay)
+        return {
+            'status': 'market_closed',
+            'order_id': order_id,
+            'reason': 'Market is closed, requeued for next trading window',
+            'delay_seconds': suggested_delay
         }
 
     ticker = order.get('ticker')

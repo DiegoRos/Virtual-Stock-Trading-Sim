@@ -8,7 +8,7 @@ TAG="trading-simulator"
 REGION="${AWS_REGION:-us-east-1}"
 API_ID="${API_ID:-dshwsohlu4}"
 QUEUE_NAME="${OPEN_ORDERS_QUEUE_NAME:-ts-open-orders-queue}"
-RETRY_DELAY_SECONDS="${ORDER_RETRY_DELAY_SECONDS:-60}"
+RETRY_DELAY_SECONDS="${ORDER_RETRY_DELAY_SECONDS:-300}"
 
 # Define Lambda functions to deploy
 # Format: "FunctionName:DirectoryName"
