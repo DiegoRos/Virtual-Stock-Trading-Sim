@@ -475,7 +475,7 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 text-slate-200 font-sans flex flex-col md:flex-row">
+    <div className="h-screen bg-slate-900 text-slate-200 font-sans flex flex-col md:flex-row overflow-hidden">
       <NavigationSidebar
         totalAUM={totalAUM}
         currentCash={toNumber(userDB.current_cash, 0)}

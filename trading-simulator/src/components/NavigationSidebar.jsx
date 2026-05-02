@@ -12,7 +12,7 @@ const NavigationSidebar = ({ totalAUM, currentCash, onLogout, userEmail }) => {
   ];
 
   return (
-    <nav className="w-full md:w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
+    <nav className="w-full md:w-64 h-full bg-slate-800 border-r border-slate-700 flex flex-col overflow-y-auto">
       <div className="p-6 flex items-center gap-3 border-b border-slate-700">
         <LineChart className="text-blue-500" size={28} />
         <span className="font-bold text-xl text-white tracking-wide">Trading Sim</span>
