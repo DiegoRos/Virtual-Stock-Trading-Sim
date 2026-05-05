@@ -106,15 +106,8 @@ def lambda_handler(event, context):
             ]
 
             if side == 'BUY':
-                # Refund cash
-                transact_items.append({
-                    'Update': {
-                        'TableName': USER_TABLE,
-                        'Key': {'user_id': {'S': user_id}},
-                        'UpdateExpression': 'SET current_cash = current_cash + :amount',
-                        'ExpressionAttributeValues': {':amount': {'N': str(total_amount)}}
-                    }
-                })
+                # Cash is no longer deducted upfront for LIMIT BUY orders, so no refund is needed.
+                pass
             else:
                 # Release reserved shares
                 transact_items.append({

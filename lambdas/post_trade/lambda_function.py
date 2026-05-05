@@ -194,8 +194,9 @@ def lambda_handler(event, context):
                     'body': json.dumps({'error': 'Insufficient funds'})
                 }
 
-            transact_items = [
-                {
+            transact_items = []
+            if initial_status == 'FILLED':
+                transact_items.append({
                     'Update': {
                         'TableName': USER_TABLE,
                         'Key': {'user_id': {'S': user_id}},
@@ -203,8 +204,7 @@ def lambda_handler(event, context):
                         'ConditionExpression': 'current_cash >= :cost',
                         'ExpressionAttributeValues': {':cost': {'N': str(total_cost)}}
                     }
-                }
-            ]
+                })
 
             if initial_status == 'FILLED':
                 portfolio_res = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})

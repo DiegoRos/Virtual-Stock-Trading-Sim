@@ -247,17 +247,30 @@ def build_buy_fill_updates(order, execution_price):
     new_qty = old_qty + quantity
     new_avg = ((old_avg * old_qty) + fill_cost) / new_qty if new_qty > 0 else Decimal('0')
 
-    return {
-        'Update': {
-            'TableName': PORTFOLIO_TABLE,
-            'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
-            'UpdateExpression': 'SET quantity = :qty, average_buy_price = :avg',
-            'ExpressionAttributeValues': {
-                ':qty': {'N': str(new_qty)},
-                ':avg': {'N': str(new_avg)}
+    return [
+        {
+            'Update': {
+                'TableName': PORTFOLIO_TABLE,
+                'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
+                'UpdateExpression': 'SET quantity = :qty, average_buy_price = :avg',
+                'ExpressionAttributeValues': {
+                    ':qty': {'N': str(new_qty)},
+                    ':avg': {'N': str(new_avg)}
+                }
+            }
+        },
+        {
+            'Update': {
+                'TableName': USER_TABLE,
+                'Key': {'user_id': {'S': user_id}},
+                'UpdateExpression': 'SET current_cash = current_cash - :cost',
+                'ConditionExpression': 'current_cash >= :cost',
+                'ExpressionAttributeValues': {
+                    ':cost': {'N': str(fill_cost)}
+                }
             }
         }
-    }
+    ]
 
 
 def build_sell_fill_updates(order, execution_price):
@@ -329,16 +342,8 @@ def cancel_order(order, reason):
             }
         })
     elif side == 'BUY':
-        execution_price = to_decimal(order.get('target_price') or order.get('price'))
-        total_cost = quantity * execution_price
-        transact_items.append({
-            'Update': {
-                'TableName': USER_TABLE,
-                'Key': {'user_id': {'S': user_id}},
-                'UpdateExpression': 'SET current_cash = current_cash + :cost',
-                'ExpressionAttributeValues': {':cost': {'N': str(total_cost)}}
-            }
-        })
+        # Cash was never deducted for LIMIT BUY orders, so no refund is needed.
+        pass
 
     client.transact_write_items(TransactItems=transact_items)
     return {'order_id': order_id, 'status': 'CANCELED', 'reason': reason}
@@ -346,14 +351,15 @@ def cancel_order(order, reason):
 
 def fill_order(order, current_price):
     timestamp = datetime.datetime.utcnow().isoformat()
-    execution_price = to_decimal(order.get('target_price') or order.get('price'))
+    # Execute at the actual current market price
+    execution_price = current_price
     side = (order.get('side') or order.get('trade_action') or '').upper()
 
     logger.info(f"Filling order {order['order_id']} for user {order['user_id']} at price {execution_price}")
     transact_items = [build_order_update(order, execution_price, current_price, timestamp)]
 
     if side == 'BUY':
-        transact_items.append(build_buy_fill_updates(order, execution_price))
+        transact_items.extend(build_buy_fill_updates(order, execution_price))
     elif side == 'SELL':
         transact_items.extend(build_sell_fill_updates(order, execution_price))
     else:
@@ -367,7 +373,7 @@ def fill_order(order, current_price):
         'side': side,
         'type': order.get('type') or order.get('order_type'),
         'quantity': to_decimal(order.get('quantity'), Decimal('0')),
-        'target_price': execution_price,
+        'target_price': to_decimal(order.get('target_price') or order.get('price')),
         'trigger_price': current_price,
         'execution_price': execution_price,
         'filled_at': timestamp
@@ -442,6 +448,17 @@ def process_order_message(message):
         }
 
     logger.info(f"TRIGGERED: Filling order {order_id}...")
+
+    # Defensive Check for BUY orders: Ensure user still has enough cash at execution time
+    if side == 'BUY':
+        user_res = dynamodb.Table(USER_TABLE).get_item(Key={'user_id': user_id})
+        item = user_res.get('Item', {})
+        current_cash = to_decimal(item.get('current_cash'), Decimal('0'))
+        quantity = to_decimal(order.get('quantity'), Decimal('0'))
+        if current_cash < (current_price * quantity):
+            logger.warning(f"CANCELLING Order {order_id}: Insufficient cash ({current_cash} < {current_price * quantity})")
+            return {'status': 'canceled', 'result': cancel_order(order, 'Insufficient cash at time of execution')}
+
     return {'status': 'filled', 'order': fill_order(order, current_price)}
 
 
