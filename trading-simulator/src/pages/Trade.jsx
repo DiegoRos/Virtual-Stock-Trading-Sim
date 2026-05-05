@@ -210,12 +210,18 @@ const Trade = ({
               </button>
               <button
                 onClick={() => handleTrade('SELL')}
-                disabled={tradeDisabled}
+                disabled={tradeDisabled || orderType === 'STOP_LOSS'}
+                title={orderType === 'STOP_LOSS' ? 'Stop-Loss is only supported for BUY orders' : ''}
                 className="flex-1 bg-red-600 hover:bg-red-700 disabled:bg-slate-700 disabled:text-slate-500 disabled:cursor-not-allowed text-white font-bold py-3 rounded-lg transition-colors"
               >
                 SELL
               </button>
             </div>
+            {orderType === 'STOP_LOSS' && (
+              <p className="text-xs text-yellow-500 mt-2 italic text-center">
+                * Stop-Loss is only supported for BUY orders in this simulator.
+              </p>
+            )}
           </div>
 
           {/* Quote Info */}

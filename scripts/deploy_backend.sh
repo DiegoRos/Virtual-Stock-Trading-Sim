@@ -1,4 +1,5 @@
 #!/bin/bash
+set -euo pipefail
 
 # AWS Deployment Script for Trading Simulator Backend (Linux/Bash)
 # Requirements: AWS CLI, zip
@@ -19,10 +20,11 @@ LAMBDAS=(
     "ts-manage-watchlist:manage_watchlist"
     "ts-manage-orders:manage_orders"
     "ts-process-open-orders:process_open_orders"
+    "ts-market-data:market_data"
 )
 
 # Parse target function argument
-TARGET=$1
+TARGET="${1:-}"
 if [ -n "$TARGET" ]; then
     FOUND=false
     VALID_TARGETS=()
@@ -66,6 +68,18 @@ aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::a
 aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::aws:policy/AmazonSQSFullAccess"
 aws iam attach-role-policy --role-name "$ROLE_NAME" --policy-arn "arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole"
 
+# Add Secrets Manager Read Access
+echo "Adding Secrets Manager read access to $ROLE_NAME..."
+SECRET_POLICY='{
+    "Version": "2012-10-17",
+    "Statement": [{
+        "Effect": "Allow",
+        "Action": "secretsmanager:GetSecretValue",
+        "Resource": "arn:aws:secretsmanager:us-east-1:972793825948:secret:trading-sim/finnhub-api-key-iSMM9P"
+    }]
+}'
+aws iam put-role-policy --role-name "$ROLE_NAME" --policy-name "SecretsManagerReadAccess" --policy-document "$SECRET_POLICY"
+
 echo "Ensuring SQS queue: $QUEUE_NAME..."
 QUEUE_URL=$(aws sqs get-queue-url --queue-name "$QUEUE_NAME" --query 'QueueUrl' --output text 2>/dev/null)
 if [ -z "$QUEUE_URL" ]; then
@@ -87,7 +101,7 @@ BACKEND_DIR="$(pwd)/lambdas"
 for entry in "${LAMBDAS[@]}"; do
     FUNC_NAME="${entry%%:*}"
     DIR_NAME="${entry#*:}"
-    ZIP_FILE="${FUNC_NAME}.zip"
+    ZIP_FILE="$(pwd)/${FUNC_NAME}.zip"
     SOURCE_PATH="${BACKEND_DIR}/${DIR_NAME}"
     
     echo "------------------------------------"
@@ -95,7 +109,20 @@ for entry in "${LAMBDAS[@]}"; do
     
     # Packaging
     rm -f "$ZIP_FILE"
-    (cd "$SOURCE_PATH" && zip -r "../../$ZIP_FILE" lambda_function.py)
+    
+    if [ -f "${SOURCE_PATH}/requirements.txt" ]; then
+        echo "Installing requirements for $FUNC_NAME..."
+        TEMP_DIR=$(mktemp -d)
+        pip install -r "${SOURCE_PATH}/requirements.txt" -t "$TEMP_DIR" --quiet
+        (cd "$TEMP_DIR" && zip -r "$ZIP_FILE" .)
+        rm -rf "$TEMP_DIR"
+    fi
+
+    echo "Adding source files to $ZIP_FILE..."
+    (cd "$SOURCE_PATH" && zip -g "$ZIP_FILE" lambda_function.py)
+    if [ -f "${SOURCE_PATH}/stock_universe.py" ]; then
+        (cd "$SOURCE_PATH" && zip -g "$ZIP_FILE" stock_universe.py)
+    fi
     
     # Check if function exists
     if aws lambda get-function --function-name "$FUNC_NAME" >/dev/null 2>&1; then
@@ -104,16 +131,7 @@ for entry in "${LAMBDAS[@]}"; do
         aws lambda wait function-updated --function-name "$FUNC_NAME"
     else
         echo "Creating $FUNC_NAME (Architecture: arm64)..."
-        aws lambda create-function \
-            --function-name "$FUNC_NAME" \
-            --runtime python3.12 \
-            --role "$ROLE_ARN" \
-            --handler lambda_function.lambda_handler \
-            --zip-file "fileb://$ZIP_FILE" \
-            --architectures arm64 \
-            --memory-size 128 \
-            --timeout 10 \
-            --tags "Project=$TAG" >/dev/null
+        aws lambda create-function --function-name "$FUNC_NAME" --runtime python3.12 --role "$ROLE_ARN" --handler lambda_function.lambda_handler --zip-file "fileb://$ZIP_FILE" --architectures arm64 --memory-size 128 --timeout 10 --tags "Project=$TAG" >/dev/null
         aws lambda wait function-active --function-name "$FUNC_NAME"
     fi
     
@@ -123,33 +141,17 @@ for entry in "${LAMBDAS[@]}"; do
     ACCOUNT_ID=$(aws sts get-caller-identity --query 'Account' --output text)
     
     echo "Ensuring API Gateway permission for $FUNC_NAME..."
-    aws lambda add-permission \
-        --function-name "$FUNC_NAME" \
-        --statement-id "AllowExecutionFromAPIGateway" \
-        --action "lambda:InvokeFunction" \
-        --principal "apigateway.amazonaws.com" \
-        --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/*/*" \
-        2>/dev/null || echo "Permission already exists for $FUNC_NAME."
+    aws lambda add-permission --function-name "$FUNC_NAME" --statement-id "AllowExecutionFromAPIGateway" --action "lambda:InvokeFunction" --principal "apigateway.amazonaws.com" --source-arn "arn:aws:execute-api:$REGION:$ACCOUNT_ID:$API_ID/*/*/*" 2>/dev/null || echo "Permission already exists for $FUNC_NAME."
 
     if [ "$FUNC_NAME" == "ts-post-trade" ]; then
         echo "Updating OPEN_ORDERS_QUEUE_URL environment variable for $FUNC_NAME..."
-        aws lambda update-function-configuration \
-            --function-name "$FUNC_NAME" \
-            --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL}" >/dev/null
+        aws lambda update-function-configuration --function-name "$FUNC_NAME" --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL}" >/dev/null
         aws lambda wait function-updated --function-name "$FUNC_NAME"
     fi
 
     if [ "$FUNC_NAME" == "ts-process-open-orders" ]; then
         echo "Updating queue processor environment variables for $FUNC_NAME..."
-        if [ -n "$FINNHUB_API_KEY" ]; then
-            aws lambda update-function-configuration \
-                --function-name "$FUNC_NAME" \
-                --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL,ORDER_RETRY_DELAY_SECONDS=$RETRY_DELAY_SECONDS,FINNHUB_API_KEY=$FINNHUB_API_KEY}" >/dev/null
-        else
-            aws lambda update-function-configuration \
-                --function-name "$FUNC_NAME" \
-                --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL,ORDER_RETRY_DELAY_SECONDS=$RETRY_DELAY_SECONDS}" >/dev/null
-        fi
+        aws lambda update-function-configuration --function-name "$FUNC_NAME" --environment "Variables={OPEN_ORDERS_QUEUE_URL=$QUEUE_URL,ORDER_RETRY_DELAY_SECONDS=$RETRY_DELAY_SECONDS}" >/dev/null
         aws lambda wait function-updated --function-name "$FUNC_NAME"
     fi
 done
@@ -158,18 +160,10 @@ if [ -z "$TARGET" ] || [ "$TARGET" == "process_open_orders" ]; then
     PROCESSOR_FUNCTION="ts-process-open-orders"
 
     echo "Ensuring SQS event source mapping for $PROCESSOR_FUNCTION..."
-    EXISTING_MAPPING=$(aws lambda list-event-source-mappings \
-        --function-name "$PROCESSOR_FUNCTION" \
-        --event-source-arn "$QUEUE_ARN" \
-        --query 'EventSourceMappings[0].UUID' \
-        --output text 2>/dev/null)
+    EXISTING_MAPPING=$(aws lambda list-event-source-mappings --function-name "$PROCESSOR_FUNCTION" --event-source-arn "$QUEUE_ARN" --query 'EventSourceMappings[0].UUID' --output text 2>/dev/null)
 
     if [ -z "$EXISTING_MAPPING" ] || [ "$EXISTING_MAPPING" == "None" ]; then
-        aws lambda create-event-source-mapping \
-            --function-name "$PROCESSOR_FUNCTION" \
-            --event-source-arn "$QUEUE_ARN" \
-            --batch-size 1 \
-            --function-response-types ReportBatchItemFailures >/dev/null
+        aws lambda create-event-source-mapping --function-name "$PROCESSOR_FUNCTION" --event-source-arn "$QUEUE_ARN" --batch-size 1 --function-response-types ReportBatchItemFailures >/dev/null
     else
         echo "SQS event source mapping already exists for $PROCESSOR_FUNCTION."
     fi

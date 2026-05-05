@@ -2,6 +2,7 @@ import json
 import os
 import re
 import time
+import logging
 from datetime import datetime, timezone
 
 import boto3
@@ -13,6 +14,10 @@ from stock_universe import (
     find_supported_stock,
     search_supported_stocks,
 )
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource("dynamodb")
 CACHE_TABLE = os.environ.get("MARKET_CACHE_TABLE", "MarketDataCache")
@@ -179,7 +184,7 @@ def fetch_search(query, limit):
                 seen.add(quote["symbol"])
                 results.append(quote)
     except Exception as exc:
-        print(f"yfinance search failed for {query}: {str(exc)}")
+        logger.error(f"yfinance search failed for {query}: {str(exc)}")
 
     for stock in search_supported_stocks(query, limit):
         if stock["symbol"] not in seen:
@@ -377,5 +382,5 @@ def lambda_handler(event, context):
     except ValueError as exc:
         return response(404, {"error": str(exc)})
     except Exception as exc:
-        print(f"Market data error: {str(exc)}")
+        logger.error(f"Market data error: {str(exc)}")
         return response(500, {"error": "Unable to fetch market data"})

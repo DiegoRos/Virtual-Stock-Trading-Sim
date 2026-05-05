@@ -1,13 +1,17 @@
 import datetime
 import json
 import os
-import urllib.parse
+import time
 import urllib.request
+import logging
 from decimal import Decimal, InvalidOperation
 
 import boto3
 from botocore.exceptions import ClientError
 
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 client = boto3.client('dynamodb')
@@ -72,33 +76,87 @@ def get_retry_delay_seconds():
 
 def parse_message_body(record):
     body = record.get('body', '{}')
+    logger.info(f"Parsing message body: {body}")
     if isinstance(body, dict):
         return body
-    return json.loads(body)
+    try:
+        return json.loads(body)
+    except Exception as e:
+        logger.error(f"Failed to parse message body as JSON: {e}")
+        return {}
 
 
 def get_order(user_id, order_id):
+    logger.info(f"Fetching order {order_id} for user {user_id} from {TRANSACTIONS_TABLE}")
     result = dynamodb.Table(TRANSACTIONS_TABLE).get_item(
         Key={'user_id': user_id, 'order_id': order_id}
     )
     return result.get('Item')
 
 
-def fetch_finnhub_price(ticker):
-    api_key = os.environ.get('FINNHUB_API_KEY')
+def get_secret():
+    # Allow override via environment variable for debugging
+    env_key = os.environ.get('FINNHUB_API_KEY')
+    if env_key:
+        logger.info("Using Finnhub API key from environment variable")
+        return env_key
+
+    secret_name = "trading-sim/finnhub-api-key"
+    region_name = "us-east-1"
+    session = boto3.session.Session()
+    client = session.client(service_name='secretsmanager', region_name=region_name)
+    try:
+        get_secret_value_response = client.get_secret_value(SecretId=secret_name)
+        secret = get_secret_value_response['SecretString']
+        logger.info(f"Successfully retrieved secret: {secret_name}")
+        return secret
+    except ClientError as e:
+        logger.error(f"Error fetching secret {secret_name}: {e}")
+        return None
+
+
+def fetch_current_price(ticker_symbol):
+    logger.info(f"Fetching price for {ticker_symbol} from Finnhub")
+    raw_secret = get_secret()
+    if not raw_secret:
+        logger.error("Finnhub API key not available")
+        raise RuntimeError("Finnhub API key not available")
+    
+    api_key = raw_secret
+    # Finnhub secret might be a JSON or raw string
+    try:
+        key_data = json.loads(raw_secret)
+        if isinstance(key_data, dict):
+            # Try various common keys
+            api_key = (
+                key_data.get('api_key') or 
+                key_data.get('FINNHUB_API_KEY') or 
+                key_data.get('trading-sim/finnhub-api-key') or
+                next(iter(key_data.values())) # Fallback to the first value if it's a single-entry dict
+            )
+            logger.info(f"Extracted API key from JSON. Keys found: {list(key_data.keys())}")
+    except (json.JSONDecodeError, StopIteration, AttributeError):
+        logger.info("Secret is not a JSON dictionary, using raw string")
+        pass
+
     if not api_key:
-        raise RuntimeError('FINNHUB_API_KEY is not configured')
+        logger.error("Extracted API key is empty")
+        raise RuntimeError("Extracted API key is empty")
 
-    query = urllib.parse.urlencode({'symbol': ticker, 'token': api_key})
-    url = f'https://finnhub.io/api/v1/quote?{query}'
-    with urllib.request.urlopen(url, timeout=8) as quote_response:
-        payload = json.loads(quote_response.read().decode('utf-8'), parse_float=Decimal)
-
-    current_price = to_decimal(payload.get('c'))
-    if current_price is None or current_price <= 0:
-        raise RuntimeError(f'Finnhub returned no current price for {ticker}')
-
-    return current_price
+    try:
+        symbol = ticker_symbol.upper()
+        url = f"https://finnhub.io/api/v1/quote?symbol={symbol}&token={api_key}"
+        req = urllib.request.Request(url)
+        with urllib.request.urlopen(req, timeout=10) as response:
+            data = json.loads(response.read().decode())
+            price = data.get('c') # 'c' is the current price in Finnhub response
+            if price is None or price <= 0:
+                logger.error(f"Finnhub returned invalid price for {symbol}: {price}. Response: {data}")
+                raise RuntimeError(f"Invalid price from Finnhub for {symbol}")
+            return Decimal(str(round(float(price), 4)))
+    except Exception as e:
+        logger.error(f"Finnhub fetch failed for {ticker_symbol}: {e}")
+        raise
 
 
 def should_trigger(order, current_price):
@@ -106,22 +164,27 @@ def should_trigger(order, current_price):
     side = (order.get('side') or order.get('trade_action') or '').upper()
     target_price = to_decimal(order.get('target_price') or order.get('price'))
 
+    logger.info(f"should_trigger - Type: {order_type}, Side: {side}, Target: {target_price}, Current: {current_price}")
+
     if target_price is None or current_price is None:
+        logger.warning("Target price or current price is None, skipping trigger check")
         return False
 
+    triggered = False
     if order_type == 'LIMIT':
         if side == 'BUY':
-            return current_price <= target_price
-        if side == 'SELL':
-            return current_price >= target_price
+            triggered = current_price <= target_price
+        elif side == 'SELL':
+            triggered = current_price >= target_price
 
-    if order_type == 'STOP_LOSS':
+    elif order_type == 'STOP_LOSS':
         if side == 'SELL':
-            return current_price <= target_price
-        if side == 'BUY':
-            return current_price >= target_price
+            triggered = current_price <= target_price
+        elif side == 'BUY':
+            triggered = current_price >= target_price
 
-    return False
+    logger.info(f"Trigger condition met: {triggered}")
+    return triggered
 
 
 def requeue_order(order, attempt, delay=None):
@@ -132,6 +195,7 @@ def requeue_order(order, attempt, delay=None):
     if delay is None:
         delay = get_retry_delay_seconds()
 
+    logger.info(f"Requeueing order {order['order_id']} with delay {delay}s (Attempt {attempt + 1})")
     sqs.send_message(
         QueueUrl=queue_url,
         DelaySeconds=delay,
@@ -235,6 +299,7 @@ def cancel_order(order, reason):
     quantity = to_decimal(order.get('quantity'), Decimal('0'))
     timestamp = datetime.datetime.utcnow().isoformat()
 
+    logger.info(f"Cancelling order {order_id} for user {user_id}. Reason: {reason}")
     transact_items = [
         {
             'Update': {
@@ -284,6 +349,7 @@ def fill_order(order, current_price):
     execution_price = to_decimal(order.get('target_price') or order.get('price'))
     side = (order.get('side') or order.get('trade_action') or '').upper()
 
+    logger.info(f"Filling order {order['order_id']} for user {order['user_id']} at price {execution_price}")
     transact_items = [build_order_update(order, execution_price, current_price, timestamp)]
 
     if side == 'BUY':
@@ -313,14 +379,19 @@ def process_order_message(message):
     order_id = message.get('order_id')
     attempt = int(message.get('attempt', 1))
 
+    logger.info(f"Processing order {order_id} for user {user_id} (Attempt: {attempt})")
+
     if not user_id or not order_id:
+        logger.warning(f"Skipping: Missing user_id or order_id in message: {message}")
         return {'status': 'skipped', 'reason': 'Missing user_id or order_id'}
 
     order = get_order(user_id, order_id)
     if not order:
+        logger.warning(f"Skipping: Order {order_id} not found for user {user_id}")
         return {'status': 'skipped', 'order_id': order_id, 'reason': 'Order not found'}
 
     order_status = (order.get('status') or '').upper()
+    logger.info(f"Order {order_id} status: {order_status}")
     if order_status != 'OPEN':
         return {
             'status': 'skipped',
@@ -330,7 +401,9 @@ def process_order_message(message):
 
     # Check Market Status before fetching price
     market_open, suggested_delay = get_market_status()
+    logger.info(f"Market status: {'OPEN' if market_open else 'CLOSED'} (Suggested delay: {suggested_delay})")
     if not market_open:
+        logger.info(f"Market closed. Dropping message for order {order_id}.")
         # Instead of requeueing, we drop the message from SQS.
         # The "market_open_trigger" sweeper will re-populate the queue at 9:30 AM EST.
         return {
@@ -341,6 +414,8 @@ def process_order_message(message):
 
     ticker = order.get('ticker')
     side = (order.get('side') or order.get('trade_action') or '').upper()
+    order_type = (order.get('type') or order.get('order_type') or '').upper()
+    target_price = to_decimal(order.get('target_price') or order.get('price'))
 
     # Defensive Check for SELL orders: Ensure user still owns the shares
     if side == 'SELL':
@@ -348,11 +423,14 @@ def process_order_message(message):
         item = portfolio_res.get('Item', {})
         current_qty = to_decimal(item.get('quantity'), Decimal('0'))
         if current_qty < to_decimal(order.get('quantity'), Decimal('0')):
+            logger.warning(f"CANCELLING Order {order_id}: Insufficient shares ({current_qty} < {order.get('quantity')})")
             return {'status': 'canceled', 'result': cancel_order(order, 'Insufficient shares at time of execution')}
 
-    current_price = fetch_finnhub_price(ticker)
+    current_price = fetch_current_price(ticker)
+    logger.info(f"Ticker: {ticker}, Side: {side}, Type: {order_type}, Target: {target_price}, Current: {current_price}")
 
     if not should_trigger(order, current_price):
+        logger.info(f"Order {order_id} not triggered. Requeueing...")
         requeue_order(order, attempt)
         return {
             'status': 'requeued',
@@ -363,12 +441,15 @@ def process_order_message(message):
             'retry_delay_seconds': get_retry_delay_seconds()
         }
 
+    logger.info(f"TRIGGERED: Filling order {order_id}...")
     return {'status': 'filled', 'order': fill_order(order, current_price)}
 
 
 def lambda_handler(event, context):
+    logger.info(f"lambda_handler called with event: {json.dumps(event, cls=DecimalEncoder)}")
     try:
         records = event.get('Records') or []
+        logger.info(f"Processing {len(records)} SQS records")
         if not records:
             return response(200, {'processed': 0, 'results': []})
 
@@ -378,8 +459,10 @@ def lambda_handler(event, context):
         for record in records:
             message_id = record.get('messageId')
             try:
+                logger.info(f"Processing message ID: {message_id}")
                 results.append(process_order_message(parse_message_body(record)))
             except ClientError as err:
+                logger.error(f"ClientError processing message {message_id}: {err}")
                 failures.append({'itemIdentifier': message_id})
                 results.append({
                     'status': 'error',
@@ -387,6 +470,7 @@ def lambda_handler(event, context):
                     'error': err.response.get('Error', {}).get('Message', str(err))
                 })
             except Exception as err:
+                logger.error(f"Unexpected error processing message {message_id}: {err}")
                 failures.append({'itemIdentifier': message_id})
                 results.append({
                     'status': 'error',
@@ -397,8 +481,10 @@ def lambda_handler(event, context):
         payload = {'processed': len(records), 'results': results}
         if failures:
             payload['batchItemFailures'] = failures
+        
+        logger.info(f"Batch processing complete. Results: {json.dumps(payload, cls=DecimalEncoder)}")
         return payload
 
     except Exception as err:
-        print(f"Error processing order queue: {str(err)}")
+        logger.error(f"Critical error in lambda_handler: {str(err)}")
         return response(500, {'error': str(err)})

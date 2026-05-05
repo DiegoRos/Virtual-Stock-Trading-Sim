@@ -1,6 +1,11 @@
 import json, boto3, os
+import logging
 from datetime import datetime
 from botocore.exceptions import ClientError
+
+# Configure logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 s3 = boto3.client('s3')
 bedrock = boto3.client('bedrock-runtime')
@@ -66,7 +71,8 @@ def summarize_meta(title, description, snippet):
         response = bedrock.invoke_model(modelId=MODEL_ID_META, body=request)
 
     except (ClientError, Exception) as e:
-        print(f"ERROR: Can't invoke '{model_id}'. Reason: {e}")
+        logger.error(f"ERROR: Can't invoke model. Reason: {e}")
+        raise
 
     model_response = json.loads(response["body"].read())
 
@@ -75,8 +81,13 @@ def summarize_meta(title, description, snippet):
     summary = ""
     impact_str = ""
     if response_text:
-        summary = response_text.split("Summary:")[1].split("Impact:")[0].strip()
-        impact_str = response_text.split("Impact:")[1].strip()
+        try:
+            summary = response_text.split("Summary:")[1].split("Impact:")[0].strip()
+            impact_str = response_text.split("Impact:")[1].strip()
+        except IndexError:
+            logger.warning(f"Failed to parse model response: {response_text}")
+            summary = response_text
+            impact_str = "Unknown"
     return summary, impact_str
 
 
@@ -93,54 +104,59 @@ def extract_entities(text):
     return list(set(orgs))
 
 def lambda_handler(event, context):
-    print("Processing News....")
+    logger.info("Processing News....")
     for record in event['Records']:
         bucket = record['s3']['bucket']['name']
         key = record['s3']['object']['key']
-        print(f"Loading from  {bucket}/{key}")
+        logger.info(f"Loading from  {bucket}/{key}")
 
         obj = s3.get_object(Bucket=bucket, Key=key)
-        # print(f"OBJ: {json.loads(obj['Body'].read())}")
         articles = json.loads(obj['Body'].read())
 
-        print(f"Number of articles: {len(articles)}")
+        logger.info(f"Number of articles: {len(articles)}")
 
         symbol = key.split('/')[1]                            # e.g. "raw/AAPL/..." → "AAPL"
 
-        
-        # symbol = key.split('_')[1]
-        print(f"Symbol is {symbol}")
+        logger.info(f"Symbol is {symbol}")
 
         for article in articles:
-            print(article)
             title = article['title']
             description = article['description']
             snippet = article['snippet']
             full_text = f"{title}. {description}. {snippet}"
 
-            print(f"Processing article: {title}")
-            print("FULL TEXT:", full_text)
+            logger.info(f"Processing article: {title}")
+            logger.info(f"FULL TEXT: {full_text}")
 
-            summary, impact_str   = summarize_meta(title, description, snippet)
-            sentiment = get_sentiment(full_text)
-            entities  = extract_entities(full_text)
+            try:
+                summary, impact_str = summarize_meta(title, description, snippet)
+                sentiment = get_sentiment(full_text)
+                
+                logger.info(f"Summary: {summary} Impact: {impact_str}")
 
-            print("Summary:", summary, " Impact: ", impact_str)
+                table.put_item(Item={
+                    'symbol':     symbol,
+                    'timestamp':  datetime.utcnow().isoformat(),
+                    'title':      title,
+                    'source':     article['source'],
+                    'url':        article['url'],
+                    'summary':    summary,
+                    'sentiment':  sentiment['label'],
+                    'sentimentScores': {k: str(round(v, 4)) for k, v in sentiment['scores'].items()},
+                    'impact':     classify_impact(sentiment['label'], sentiment['scores']),
+                    'impact_str': impact_str
+                })
 
-            table.put_item(Item={
-                'symbol':     symbol,
-                'timestamp':  datetime.utcnow().isoformat(),
-                'title':      title,
-                'source':     article['source'],
-                'url':        article['url'],
-                'summary':    summary,
-                'sentiment':  sentiment['label'],
-                'sentimentScores': {k: str(round(v, 4)) for k, v in sentiment['scores'].items()},
-                'impact':     classify_impact(sentiment['label'], sentiment['scores']),
-                'impact_str': impact_str
-            })
+                logger.info("Added to table")
+            except Exception as e:
+                logger.error(f"Error processing article {title}: {e}")
 
-            print("Added to table")
+def classify_impact(label, scores):
+    if label == 'POSITIVE' and scores['Positive'] > 0.8:
+        return 'BULLISH'
+    elif label == 'NEGATIVE' and scores['Negative'] > 0.8:
+        return 'BEARISH'
+    return 'NEUTRAL'
 
 def classify_impact(label, scores):
     if label == 'POSITIVE' and scores['Positive'] > 0.8:

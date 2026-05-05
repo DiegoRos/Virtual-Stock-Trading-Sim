@@ -1,7 +1,12 @@
 import json
 import boto3
 import os
+import logging
 from boto3.dynamodb.conditions import Key
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 sqs = boto3.client('sqs')
@@ -14,7 +19,7 @@ def lambda_handler(event, context):
     try:
         if not QUEUE_URL:
             # Fallback for testing environment if needed, but prefer env var
-            print("Warning: OPEN_ORDERS_QUEUE_URL env var not found.")
+            logger.error("Error: OPEN_ORDERS_QUEUE_URL env var not found.")
             # return {"statusCode": 500, "body": "OPEN_ORDERS_QUEUE_URL not configured"}
             raise RuntimeError('OPEN_ORDERS_QUEUE_URL is not configured')
         
@@ -40,7 +45,7 @@ def lambda_handler(event, context):
             if not last_evaluated_key:
                 break
         
-        print(f"Found {len(open_orders)} open orders to re-enqueue.")
+        logger.info(f"Found {len(open_orders)} open orders to re-enqueue.")
         
         enqueued_count = 0
         # Batch send to SQS (max 10 per batch)
@@ -71,7 +76,7 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        print(f"Error in market_open_trigger: {str(e)}")
+        logger.error(f"Error in market_open_trigger: {str(e)}")
         return {
             'statusCode': 500,
             'body': json.dumps({'error': str(e)})

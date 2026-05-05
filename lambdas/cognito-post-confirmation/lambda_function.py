@@ -1,8 +1,13 @@
 import json
 import boto3
 import os
+import logging
 from datetime import datetime
 from decimal import Decimal
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 # Initialize DynamoDB client
 dynamodb = boto3.resource('dynamodb')
@@ -14,7 +19,7 @@ def lambda_handler(event, context):
     """
     Cognito Post-Confirmation trigger that initializes a user profile in DynamoDB.
     """
-    print(f"Received event: {json.dumps(event)}")
+    logger.info(f"Received event: {json.dumps(event)}")
     
     # Cognito triggers are in event['request']['userAttributes']
     user_attributes = event.get('request', {}).get('userAttributes', {})
@@ -22,7 +27,7 @@ def lambda_handler(event, context):
     email = user_attributes.get('email')
     
     if not user_id:
-        print("Error: user_id (sub) not found in event.")
+        logger.error("Error: user_id (sub) not found in event.")
         return event
 
     try:
@@ -36,13 +41,13 @@ def lambda_handler(event, context):
             'created_at': datetime.utcnow().isoformat()
         }
         
-        print(f"Attempting to insert profile for user {user_id} into {table_name}")
+        logger.info(f"Attempting to insert profile for user {user_id} into {table_name}")
         table.put_item(Item=item)
-        print(f"Successfully created profile for user: {user_id}")
+        logger.info(f"Successfully created profile for user: {user_id}")
         
     except Exception as e:
         # Log the error but return the event to avoid blocking user sign-up
-        print(f"Error inserting user into UserDB: {str(e)}")
+        logger.error(f"Error inserting user into UserDB: {str(e)}")
         
     # Return the event to Cognito to complete the confirmation process
     return event

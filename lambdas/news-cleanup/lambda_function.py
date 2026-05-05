@@ -1,7 +1,12 @@
 import boto3
 import json
 import os
+import logging
 from datetime import datetime, timezone, timedelta
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 s3 = boto3.client('s3')
 dynamodb = boto3.resource('dynamodb')
@@ -44,13 +49,13 @@ def get_dynamo_entries_for_symbol(symbol, filename):
     # Convert filename timestamp (202410141830) to ISO prefix (2024-10-14)
     try:
         file_dt = datetime.strptime(filename, '%Y%m%d%H%M')
-        print(f"Parsing filename {filename} as {file_dt}")
+        logger.info(f"Parsing filename {filename} as {file_dt}")
         # date_prefix = file_dt.strftime('%Y-%m-%dT%H:%M')
         date_prefix = file_dt.strftime('%Y-%m-%dT%H:')
-        print(f"Date prefix for query: {date_prefix}")
+        logger.info(f"Date prefix for query: {date_prefix}")
 
     except ValueError:
-        print(f"Could not parse filename as timestamp: {filename}")
+        logger.error(f"Could not parse filename as timestamp: {filename}")
         return []
 
     resp = table.query(
@@ -71,37 +76,37 @@ def delete_dynamo_entries(symbol, timestamps):
                 'symbol': symbol,
                 'timestamp': ts
             })
-    print(f"Deleted {len(timestamps)} DynamoDB entries for {symbol}")
+    logger.info(f"Deleted {len(timestamps)} DynamoDB entries for {symbol}")
 
 def delete_s3_file(key):
     """Delete a single S3 object."""
     s3.delete_object(Bucket=BUCKET, Key=key)
-    print(f"Deleted S3 file: {key}")
+    logger.info(f"Deleted S3 file: {key}")
 
 def lambda_handler(event, context):
-    print(f"Starting cleanup. Retention: {RETENTION_DAYS} days. Bucket: {BUCKET}")
+    logger.info(f"Starting cleanup. Retention: {RETENTION_DAYS} days. Bucket: {BUCKET}")
 
     stale_files = get_stale_s3_files()
-    print(f"Found {len(stale_files)} stale S3 files")
+    logger.info(f"Found {len(stale_files)} stale S3 files")
 
     if not stale_files:
-        print("Nothing to clean up.")
+        logger.info("Nothing to clean up.")
         return {"statusCode": 200, "deleted": 0}
 
     total_s3_deleted = 0
     total_dynamo_deleted = 0
 
     for s3_key in stale_files:
-        print(f"Processing: {s3_key}")
+        logger.info(f"Processing: {s3_key}")
         symbol, filename = parse_key(s3_key)
 
         if not symbol:
-            print(f"Skipping malformed key: {s3_key}")
+            logger.error(f"Skipping malformed key: {s3_key}")
             continue
 
         # 1. Find matching DynamoDB entries
         timestamps = get_dynamo_entries_for_symbol(symbol, filename)
-        print(f"Found {len(timestamps)} DynamoDB entries for {symbol} / {filename}")
+        logger.info(f"Found {len(timestamps)} DynamoDB entries for {symbol} / {filename}")
 
         # 2. Delete DynamoDB entries first
         delete_dynamo_entries(symbol, timestamps)
@@ -116,5 +121,5 @@ def lambda_handler(event, context):
         "s3_files_deleted": total_s3_deleted,
         "dynamo_entries_deleted": total_dynamo_deleted
     }
-    print(f"Cleanup complete: {summary}")
+    logger.info(f"Cleanup complete: {summary}")
     return summary

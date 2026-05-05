@@ -1,7 +1,12 @@
 import json
 import boto3
 import os
+import logging
 from decimal import Decimal
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 table = dynamodb.Table('UserDB')
@@ -41,7 +46,7 @@ def lambda_handler(event, context):
             'body': json.dumps(response['Item'], cls=DecimalEncoder)
         }
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.error(f"Error: {str(e)}")
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},

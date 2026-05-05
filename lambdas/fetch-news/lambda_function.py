@@ -1,6 +1,11 @@
 import json, boto3, urllib.request, os
+import logging
 from datetime import datetime, timedelta
 import requests
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 s3 = boto3.client('s3')
 secrets = boto3.client('secretsmanager')
@@ -20,8 +25,7 @@ def lambda_handler(event, context):
     symbols = event.get('symbols', ['TSLA'])
     published_after = get_published_after()
 
-    print("Symbols", symbols, " published_after:", published_after, 
-          "bucket:", BUCKET)
+    logger.info(f"Symbols {symbols} published_after: {published_after} bucket: {BUCKET}")
 
     for symbol in symbols:
         url = (
@@ -34,7 +38,7 @@ def lambda_handler(event, context):
             f"&published_after={published_after}"      
             f"&api_token={token}"
         )
-        print("URL: ", url)
+        logger.info(f"URL: {url}")
 
         response = requests.get(url, headers={
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -42,13 +46,13 @@ def lambda_handler(event, context):
         })
         data = response.json()
 
-        print("DATA:", json.dumps(data))
+        logger.info(f"DATA: {json.dumps(data)}")
 
         articles = data.get('data', [])
 
         if articles:
             key = f"raw/{symbol}/{datetime.utcnow().strftime('%Y%m%d%H%M')}.json"
             s3.put_object(Bucket=BUCKET, Key=key, Body=json.dumps(articles))
-            print(f"Stored {len(articles)} articles for {symbol}")
+            logger.info(f"Stored {len(articles)} articles for {symbol}")
 
     return {"statusCode": 200, "message": f"Fetched news for {symbols}"}

@@ -3,7 +3,12 @@ import boto3
 import uuid
 import datetime
 import os
+import logging
 from decimal import Decimal
+
+# Initialize logging
+logger = logging.getLogger()
+logger.setLevel(logging.INFO)
 
 dynamodb = boto3.resource('dynamodb')
 client = boto3.client('dynamodb')
@@ -245,7 +250,15 @@ def lambda_handler(event, context):
                     }
                 })
 
-        elif side == 'SELL':
+        if side == 'SELL':
+            # Stop loss sells are not allowed per user request
+            if order_type == 'STOP_LOSS':
+                return {
+                    'statusCode': 400,
+                    'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
+                    'body': json.dumps({'error': 'Stop loss sells are not supported. Please use Limit orders for selling at a target price.'})
+                }
+
             # Check if user has enough shares (Available = Quantity - Reserved)
             portfolio_response = dynamodb.Table(PORTFOLIO_TABLE).get_item(Key={'user_id': user_id, 'ticker': ticker})
             item = portfolio_response.get('Item', {})
@@ -274,13 +287,17 @@ def lambda_handler(event, context):
                     }
                 })
                 # Immediate Share Deduction
+                # Condition ensures we still have enough shares considering potential race conditions
                 transact_items.append({
                     'Update': {
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
                         'UpdateExpression': 'SET quantity = quantity - :qty',
-                        'ConditionExpression': 'quantity - if_not_exists(reserved_quantity, :zero) >= :qty',
-                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}, ':zero': {'N': '0'}}
+                        'ConditionExpression': 'quantity >= :required_total',
+                        'ExpressionAttributeValues': {
+                            ':qty': {'N': str(quantity)},
+                            ':required_total': {'N': str(quantity + reserved_qty)}
+                        }
                     }
                 })
             else:
@@ -290,8 +307,12 @@ def lambda_handler(event, context):
                         'TableName': PORTFOLIO_TABLE,
                         'Key': {'user_id': {'S': user_id}, 'ticker': {'S': ticker}},
                         'UpdateExpression': 'SET reserved_quantity = if_not_exists(reserved_quantity, :zero) + :qty',
-                        'ConditionExpression': 'quantity - if_not_exists(reserved_quantity, :zero) >= :qty',
-                        'ExpressionAttributeValues': {':qty': {'N': str(quantity)}, ':zero': {'N': '0'}}
+                        'ConditionExpression': 'quantity >= :required_total',
+                        'ExpressionAttributeValues': {
+                            ':qty': {'N': str(quantity)},
+                            ':zero': {'N': '0'},
+                            ':required_total': {'N': str(quantity + reserved_qty)}
+                        }
                     }
                 })
 
@@ -326,7 +347,7 @@ def lambda_handler(event, context):
         }
 
     except Exception as e:
-        print(f"Error: {str(e)}")
+        logger.error(f"Error: {str(e)}")
         return {
             'statusCode': 500,
             'headers': {'Content-Type': 'application/json', 'Access-Control-Allow-Origin': '*'},
