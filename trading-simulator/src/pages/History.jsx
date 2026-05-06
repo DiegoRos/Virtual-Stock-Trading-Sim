@@ -49,7 +49,26 @@ const History = ({ transactions, onCancel }) => {
               ) : (
                 sortedTransactions.map((tx) => (
                   <tr key={tx.order_id} className="hover:bg-slate-700/50 transition-colors">
-                    <td className="p-4 text-slate-400">{new Date(tx.order_timestamp || tx.timestamp).toLocaleString()}</td>
+                   <td className="p-4 text-slate-400">
+                      {(() => {
+                        const rawTs = tx.order_timestamp || tx.timestamp;
+                        const normalized = rawTs && !rawTs.endsWith('Z') && !rawTs.includes('+')
+                          ? rawTs + 'Z'
+                          : rawTs;
+
+                        const date = new Date(normalized);
+                        return date.toLocaleString(undefined, {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric',
+                          hour: '2-digit',
+                          minute: '2-digit',
+                          second: '2-digit',
+                          hour12: true,
+                          timeZoneName: 'short',
+                        });
+                      })()}
+                    </td>
                     <td className="p-4 font-bold text-white">{tx.ticker}</td>
                     <td className={`p-4 font-bold ${tx.trade_action === 'BUY' || tx.side === 'BUY' ? 'text-green-400' : 'text-red-400'}`}>
                       {tx.trade_action || tx.side}
