@@ -21,12 +21,23 @@ const StockSearchInput = ({
   const [hasSearched, setHasSearched] = useState(false);
   const [open, setOpen] = useState(false);
   const requestId = useRef(0);
+  const skipNextSearch = useRef(false); 
 
   useEffect(() => {
     setQuery(value || '');
+    setOpen(false);
+    setResults([]);
+    setHasSearched(false);
+    setError('');
+    skipNextSearch.current = true; 
   }, [value]);
 
   useEffect(() => {
+    if (skipNextSearch.current) {
+      skipNextSearch.current = false;
+      return;
+    }
+
     const trimmed = query.trim();
     if (disabled || !token || trimmed.length < 1) {
       setResults([]);
@@ -67,6 +78,14 @@ const StockSearchInput = ({
     return () => window.clearTimeout(timeoutId);
   }, [query, token, limit, disabled]);
 
+
+  useEffect(() => {
+    return () => {
+      setOpen(false);
+      setResults([]);
+    };
+  }, []);
+
   const exactResult = useMemo(() => {
     const symbol = normalizeSymbol(query);
     return results.find((result) => normalizeSymbol(result.symbol) === symbol);
@@ -76,6 +95,7 @@ const StockSearchInput = ({
     const symbol = normalizeSymbol(result?.symbol);
     if (!symbol) return;
 
+    skipNextSearch.current = true; 
     setQuery(clearOnSelect ? '' : symbol);
     setOpen(false);
     setResults([]);
