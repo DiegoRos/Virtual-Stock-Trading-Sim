@@ -1,4 +1,4 @@
-# Virtual-Stock-Trading-Sim
+# Virtual Stock Trading Simulator
 A stock portfolio management and trading simulation platform that allows users to track, analyze, and manage virtual investments in the stock market without financial risk and provide AI-driven sentiment analysis on latest financial news. This project is built on a serverless ecosystem on AWS which provides a realistic, scalable and secure platform for learning and experimenting with various trading strategies.
 
 ## Core Components
